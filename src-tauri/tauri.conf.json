@@ -53,7 +53,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ0NDI1OTAyNjMyN0JGMUIKUldRYnZ5ZGpBbGxDUk1mdlVZUVRIQUpBUElkOGkzNUN0bElVa2FEMmpORnUwVjA4aVlueXZKeU0K",
       "endpoints": [
-        "https://github.com/Nexyros/carreterie-gestion-releases/releases/latest/download/latest.json"
+        "https://github.com/nexyrosweb/carreterie-gestion/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
