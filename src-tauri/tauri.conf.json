@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Carreterie Gestion",
+  "version": "1.0.0",
+  "identifier": "fr.nexyros.carreterie-gestion",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Carreterie Gestion",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' customprotocol: asset:; img-src 'self' asset: http://asset.localhost https://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost https://github.com https://*.github.com https://objects.githubusercontent.com; frame-src 'self' blob: data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "publisher": "Nexyros",
+    "copyright": "© Nexyros · Théâtre La Carreterie",
+    "category": "Business",
+    "shortDescription": "Gestion hors ligne des factures du Théâtre de la Carreterie",
+    "longDescription": "Carreterie Gestion est un micro-logiciel Windows hors ligne pour la gestion des factures clients et fournisseurs du Théâtre de la Carreterie. Développé par Nexyros. Ce logiciel n'est pas une plateforme de facturation électronique agréée.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["French"],
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ0NDI1OTAyNjMyN0JGMUIKUldRYnZ5ZGpBbGxDUk1mdlVZUVRIQUpBUElkOGkzNUN0bElVa2FEMmpORnUwVjA4aVlueXZKeU0K",
+      "endpoints": [
+        "https://github.com/Nexyros/carreterie-gestion-releases/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
