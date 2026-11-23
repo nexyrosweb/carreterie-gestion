@@ -2,8 +2,13 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
 
+use std::io::Cursor;
+
 use chrono::Utc;
-use printpdf::{BuiltinFont, Mm, PdfDocument, PdfDocumentReference, PdfLayerReference};
+use printpdf::{
+    image_crate::io::Reader as ImageReader, BuiltinFont, Image, ImageTransform, Mm, PdfDocument,
+    PdfDocumentReference, PdfLayerReference,
+};
 
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
@@ -14,6 +19,9 @@ use crate::services::contacts::ContactsService;
 use crate::services::invoices::InvoicesService;
 use crate::services::settings::SettingsService;
 use crate::DISCLAIMER_E_FACTURATION;
+
+/// Logo officiel embarqué (même fichier que `src/assets/brand/logo-theatre-carreterie.jpg`).
+const BRAND_LOGO_JPEG: &[u8] = include_bytes!("../../resources/logo-theatre-carreterie.jpg");
 
 pub struct PdfService;
 
@@ -62,6 +70,9 @@ impl PdfService {
                 "DEMONSTRATION - SANS VALEUR COMPTABLE",
             );
         }
+
+        // Logo TLC en haut à droite (fichier brand officiel).
+        let _ = place_brand_logo(&current_layer);
 
         let mut y = 280.0;
         write_line(&current_layer, &font_bold, 16.0, 20.0, y, &settings.theatre_name);
@@ -252,6 +263,27 @@ fn write_line(
     text: &str,
 ) {
     layer.use_text(text, size, Mm(x), Mm(y), font);
+}
+
+fn place_brand_logo(layer: &PdfLayerReference) -> AppResult<()> {
+    let reader = ImageReader::new(Cursor::new(BRAND_LOGO_JPEG))
+        .with_guessed_format()
+        .map_err(|e| AppError::interne(format!("Logo JPEG : {e}")))?;
+    let dyn_img = reader
+        .decode()
+        .map_err(|e| AppError::interne(format!("Décodage logo : {e}")))?;
+    let image = Image::from_dynamic_image(&dyn_img);
+    // En-tête droite (~50 mm de large sur A4).
+    image.add_to_layer(
+        layer.clone(),
+        ImageTransform {
+            translate_x: Some(Mm(148.0)),
+            translate_y: Some(Mm(262.0)),
+            dpi: Some(420.0),
+            ..Default::default()
+        },
+    );
+    Ok(())
 }
 
 fn save_pdf(doc: PdfDocumentReference, path: &PathBuf) -> AppResult<()> {

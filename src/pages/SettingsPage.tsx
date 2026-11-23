@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { Textarea } from "@/components/ui/Textarea";
+import { TheatreLogo } from "@/components/brand/TheatreLogo";
 import { AboutUpdatesPanel } from "@/components/settings/AboutUpdatesPanel";
 
 export function SettingsPage() {
@@ -43,7 +44,7 @@ export function SettingsPage() {
       theatre_address: settings.theatre_address,
       theatre_siret: settings.theatre_siret,
       theatre_vat_number: settings.theatre_vat_number,
-      logo_path: settings.logo_path,
+      logo_path: "brand:logo-theatre-carreterie.jpg",
       invoice_prefix: settings.invoice_prefix,
       credit_note_prefix: settings.credit_note_prefix,
       legal_mentions: settings.legal_mentions,
@@ -195,12 +196,13 @@ function TheatreIdentityFields({
         <Input label="SIRET" value={settings.theatre_siret} onChange={(e) => setSettings({ ...settings, theatre_siret: e.target.value })} />
         <Input label="N° TVA intracommunautaire" value={settings.theatre_vat_number} onChange={(e) => setSettings({ ...settings, theatre_vat_number: e.target.value })} />
       </div>
-      <Input
-        label="Chemin du logo"
-        value={settings.logo_path}
-        onChange={(e) => setSettings({ ...settings, logo_path: e.target.value })}
-        hint="Le logo sera utilisé sur les documents PDF."
-      />
+      <div>
+        <p className="mb-2 text-sm font-medium text-[var(--color-text)]">Logo</p>
+        <TheatreLogo className="max-w-[280px]" />
+        <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+          Logo officiel Théâtre La Carreterie — utilisé automatiquement sur les PDF.
+        </p>
+      </div>
     </div>
   );
 }
