@@ -78,17 +78,86 @@ pub fn imports_dir() -> AppResult<PathBuf> {
     Ok(attachments_dir()?.join("imports"))
 }
 
+/// Avatars / logos profil utilisateur.
+pub fn avatars_dir() -> AppResult<PathBuf> {
+    Ok(attachments_dir()?.join("avatars"))
+}
+
+/// Espace disque libre (octets) pour le volume contenant `path`.
+pub fn free_disk_bytes(path: &std::path::Path) -> AppResult<u64> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetDiskFreeSpaceExW(
+                lp_directory_name: *const u16,
+                lp_free_bytes_available_to_caller: *mut u64,
+                lp_total_number_of_bytes: *mut u64,
+                lp_total_number_of_free_bytes: *mut u64,
+            ) -> i32;
+        }
+
+        let mut dir = if path.exists() {
+            path.to_path_buf()
+        } else {
+            path.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| path.to_path_buf())
+        };
+        if !dir.exists() {
+            dir = app_data_root()?;
+            std::fs::create_dir_all(&dir)?;
+        }
+        let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut free_avail: u64 = 0;
+        let mut total: u64 = 0;
+        let mut free_total: u64 = 0;
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut free_avail,
+                &mut total,
+                &mut free_total,
+            )
+        };
+        if ok == 0 {
+            return Err(AppError::interne("Impossible de lire l'espace disque libre."));
+        }
+        Ok(free_avail)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Ok(2 * 1024 * 1024 * 1024)
+    }
+}
+
+/// Taille max d'un fichier d'import : espace libre moins une réserve de 200 Mo.
+pub fn max_import_bytes() -> AppResult<u64> {
+    let imports = imports_dir()?;
+    std::fs::create_dir_all(&imports)?;
+    let free = free_disk_bytes(&imports)?;
+    const RESERVE: u64 = 200 * 1024 * 1024;
+    const MIN_CAP: u64 = 1024 * 1024;
+    let max = free.saturating_sub(RESERVE);
+    Ok(max.max(MIN_CAP).min(free.saturating_sub(MIN_CAP).max(MIN_CAP)))
+}
+
 pub fn ensure_app_directories() -> AppResult<()> {
     let root = app_data_root()?;
     std::fs::create_dir_all(&root)?;
     std::fs::create_dir_all(root.join(ATTACHMENTS_DIR))?;
     std::fs::create_dir_all(root.join(ATTACHMENTS_DIR).join("imports"))?;
+    std::fs::create_dir_all(root.join(ATTACHMENTS_DIR).join("avatars"))?;
     std::fs::create_dir_all(root.join(BACKUPS_DIR))?;
 
     let demo_root = root.join(DEMO_DIR);
     std::fs::create_dir_all(&demo_root)?;
     std::fs::create_dir_all(demo_root.join(ATTACHMENTS_DIR))?;
     std::fs::create_dir_all(demo_root.join(ATTACHMENTS_DIR).join("imports"))?;
+    std::fs::create_dir_all(demo_root.join(ATTACHMENTS_DIR).join("avatars"))?;
     std::fs::create_dir_all(demo_root.join(BACKUPS_DIR))?;
     Ok(())
 }

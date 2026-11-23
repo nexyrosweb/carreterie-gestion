@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/Button";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -17,12 +16,6 @@ export function TopBar({ title }: { title: string }) {
       </div>
       <div className="flex shrink-0 items-center gap-3">
         <ThemeToggle />
-        <Link
-          to="/a-propos"
-          className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-or)]"
-        >
-          À propos
-        </Link>
         <Button variant="secondary" size="sm" onClick={() => void logout()}>
           Déconnexion
         </Button>

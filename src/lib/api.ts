@@ -2,6 +2,9 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import type {
   AppSettings,
   AppSettingsPatch,
+  ImportLimits,
+  UserProfile,
+  UserProfilePatch,
   AuditEntry,
   BackupInfo,
   Contact,
@@ -123,6 +126,18 @@ export const apiAuthChangePassword = (
     currentPassword,
     newPassword,
   });
+
+export const apiAuthProfileGet = (sessionToken: string) =>
+  call<UserProfile>("auth_profile_get", withSession(sessionToken));
+
+export const apiAuthProfileUpdate = (sessionToken: string, patch: UserProfilePatch) =>
+  call<UserProfile>("auth_profile_update", withSession(sessionToken, { patch }));
+
+export const apiAuthProfileSetAvatar = (sessionToken: string, sourcePath: string) =>
+  call<UserProfile>(
+    "auth_profile_set_avatar",
+    withSession(sessionToken, { sourcePath }),
+  );
 
 // — Contacts —
 export const apiContactsList = (sessionToken: string, search?: string) =>
@@ -260,6 +275,9 @@ export const apiSettingsUpdate = (sessionToken: string, patch: AppSettingsPatch)
   call<AppSettings>("settings_update", withSession(sessionToken, { patch }));
 
 // — Import PDF —
+export const apiImportLimitsGet = (sessionToken: string) =>
+  call<ImportLimits>("import_limits_get", withSession(sessionToken));
+
 export const apiImportAnalyzePdfs = (
   sessionToken: string,
   paths: string[],

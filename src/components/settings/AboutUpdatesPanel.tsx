@@ -11,7 +11,7 @@ import {
   setCheckUpdatesOnStartup,
 } from "@/lib/updaterPrefs";
 import {
-  readPendingUpdate,
+  readActivePendingUpdate,
   requestUpdateCheckWithPopup,
 } from "@/hooks/useUpdaterCheck";
 
@@ -35,28 +35,33 @@ export function AboutUpdatesPanel() {
       setVersion("aperçu web");
       return;
     }
-    void getVersion().then(setVersion).catch(() => setVersion("?"));
+    void getVersion()
+      .then((v) => {
+        setVersion(v);
+        setPendingHint(readActivePendingUpdate(v)?.version ?? null);
+      })
+      .catch(() => setVersion("?"));
     try {
       const raw = localStorage.getItem(NOTES_HISTORY_KEY);
       if (raw) setHistory(JSON.parse(raw) as NotesEntry[]);
     } catch {
       /* ignore */
     }
-    const pending = readPendingUpdate();
-    if (pending?.version) setPendingHint(pending.version);
   }, []);
 
   useEffect(() => {
-    const onAvail = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ version: string }>).detail;
-      if (detail?.version) {
-        setPendingHint(detail.version);
-        setLastCheck(getLastUpdateCheck());
-      }
+    const onAvail = () => {
+      setPendingHint(readActivePendingUpdate(version)?.version ?? null);
+      setLastCheck(getLastUpdateCheck());
     };
+    const onCleared = () => setPendingHint(null);
     window.addEventListener("carreterie:update-available", onAvail);
-    return () => window.removeEventListener("carreterie:update-available", onAvail);
-  }, []);
+    window.addEventListener("carreterie:update-cleared", onCleared);
+    return () => {
+      window.removeEventListener("carreterie:update-available", onAvail);
+      window.removeEventListener("carreterie:update-cleared", onCleared);
+    };
+  }, [version]);
 
   function searchUpdates() {
     if (!isTauri()) {

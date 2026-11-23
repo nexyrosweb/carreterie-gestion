@@ -8,6 +8,7 @@ use crate::models::invoice::{
     Invoice, InvoiceDraftInput, InvoiceLineInput, InvoiceStatus, RecordPaymentInput,
 };
 use crate::models::settings::{AppSettings, AppSettingsPatch};
+use crate::models::user::{UserProfile, UserProfilePatch};
 use crate::models::supplier_invoice::{SupplierInvoice, SupplierInvoiceInput};
 use crate::models::audit::AuditEntry;
 use crate::models::import::{
@@ -24,7 +25,7 @@ use crate::services::demo::DemoService;
 use crate::services::invoices::InvoicesService;
 use crate::services::pdf::PdfService;
 use crate::services::settings::SettingsService;
-use crate::services::import::ImportService;
+use crate::services::import::{ImportLimits, ImportService};
 use crate::services::suppliers::SuppliersService;
 use crate::state::AppState;
 use crate::DISCLAIMER_E_FACTURATION;
@@ -201,6 +202,74 @@ pub fn auth_change_password(
             ));
         }
         auth::change_password(db, &user.id, &current_password, &new_password)
+    })
+}
+
+#[tauri::command]
+pub fn auth_profile_get(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+) -> Result<UserProfile, ErrorPayload> {
+    authed(&state, &session_token, |user, db| auth::get_profile(db, &user.id))
+}
+
+#[tauri::command]
+pub fn auth_profile_update(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    patch: UserProfilePatch,
+) -> Result<UserProfile, ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        if user.is_demo {
+            return Err(crate::error::AppError::interdit(
+                "Modification du profil indisponible en mode démonstration.",
+            ));
+        }
+        auth::update_profile(db, &user.id, patch)
+    })
+}
+
+#[tauri::command]
+pub fn auth_profile_set_avatar(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    source_path: String,
+) -> Result<UserProfile, ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        if user.is_demo {
+            return Err(crate::error::AppError::interdit(
+                "Modification du profil indisponible en mode démonstration.",
+            ));
+        }
+        let src = std::path::PathBuf::from(&source_path);
+        if !src.is_file() {
+            return Err(crate::error::AppError::validation("Image introuvable."));
+        }
+        let ext = src
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png")
+            .to_ascii_lowercase();
+        if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif") {
+            return Err(crate::error::AppError::validation(
+                "Formats acceptés : PNG, JPG, WEBP, GIF.",
+            ));
+        }
+        let dest_dir = paths::avatars_dir()?;
+        std::fs::create_dir_all(&dest_dir)?;
+        let dest = dest_dir.join(format!("{}.{}", user.id, ext));
+        std::fs::copy(&src, &dest)?;
+        paths::assert_path_inside_active_root(&dest)?;
+        auth::update_profile(
+            db,
+            &user.id,
+            UserProfilePatch {
+                email: None,
+                first_name: None,
+                last_name: None,
+                avatar_path: Some(dest.to_string_lossy().to_string()),
+            },
+        )
     })
 }
 
@@ -504,6 +573,14 @@ pub fn audit_list(
     authed(&state, &session_token, |_u, db| {
         AuditService::list_recent(db, limit.unwrap_or(100))
     })
+}
+
+#[tauri::command]
+pub fn import_limits_get(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+) -> Result<ImportLimits, ErrorPayload> {
+    authed(&state, &session_token, |_u, _db| ImportService::limits())
 }
 
 #[tauri::command]

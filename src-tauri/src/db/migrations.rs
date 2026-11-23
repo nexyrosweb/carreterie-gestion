@@ -198,6 +198,28 @@ CREATE INDEX IF NOT EXISTS idx_imported_number ON imported_documents(invoice_num
 INSERT OR IGNORE INTO schema_version (version) VALUES (3);
 "#;
 
+const MIGRATION_V4: &str = r#"
+ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN first_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN last_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN avatar_path TEXT NOT NULL DEFAULT '';
+
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_enabled', '0');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_host', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_port', '587');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_encryption', 'starttls');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_username', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_password', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_from_name', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_from_email', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_reply_to', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_cc', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_bcc', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_timeout_secs', '30');
+
+INSERT OR IGNORE INTO schema_version (version) VALUES (4);
+"#;
+
 pub fn run_migrations(conn: &Connection) -> AppResult<()> {
     let version: i64 = conn
         .query_row(
@@ -246,6 +268,19 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
 
     if version < 3 {
         conn.execute_batch(MIGRATION_V3)
+            .map_err(AppError::BaseDeDonnees)?;
+    }
+
+    let version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if version < 4 {
+        conn.execute_batch(MIGRATION_V4)
             .map_err(AppError::BaseDeDonnees)?;
     }
 

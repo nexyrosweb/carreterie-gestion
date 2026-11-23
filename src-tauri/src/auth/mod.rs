@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
+use crate::models::user::{UserProfile, UserProfilePatch};
 use crate::services::audit::AuditService;
 use crate::state::{SessionManager, LOCKOUT_MAX_ATTEMPTS, LOCKOUT_MINUTES};
 
@@ -178,6 +179,71 @@ pub fn logout(db: &DbPool, sessions: &SessionManager, token: &str, user_id: &str
     sessions.invalidate(token);
     AuditService::log(db, user_id, "deconnexion", None, None, None)?;
     Ok(())
+}
+
+pub fn get_profile(db: &DbPool, user_id: &str) -> AppResult<UserProfile> {
+    db.with_conn(|conn| {
+        conn.query_row(
+            "SELECT id, username,
+                    COALESCE(email, ''),
+                    COALESCE(first_name, ''),
+                    COALESCE(last_name, ''),
+                    COALESCE(avatar_path, '')
+             FROM users WHERE id = ?1",
+            params![user_id],
+            |row| {
+                Ok(UserProfile {
+                    id: row.get(0)?,
+                    username: row.get(1)?,
+                    email: row.get(2)?,
+                    first_name: row.get(3)?,
+                    last_name: row.get(4)?,
+                    avatar_path: row.get(5)?,
+                })
+            },
+        )
+        .map_err(|_| AppError::Introuvable)
+    })
+}
+
+pub fn update_profile(db: &DbPool, user_id: &str, patch: UserProfilePatch) -> AppResult<UserProfile> {
+    let now = Utc::now().to_rfc3339();
+    db.with_conn_mut(|conn| {
+        if let Some(email) = patch.email {
+            conn.execute(
+                "UPDATE users SET email = ?1, updated_at = ?2 WHERE id = ?3",
+                params![email.trim(), now, user_id],
+            )?;
+        }
+        if let Some(first_name) = patch.first_name {
+            conn.execute(
+                "UPDATE users SET first_name = ?1, updated_at = ?2 WHERE id = ?3",
+                params![first_name.trim(), now, user_id],
+            )?;
+        }
+        if let Some(last_name) = patch.last_name {
+            conn.execute(
+                "UPDATE users SET last_name = ?1, updated_at = ?2 WHERE id = ?3",
+                params![last_name.trim(), now, user_id],
+            )?;
+        }
+        if let Some(avatar_path) = patch.avatar_path {
+            conn.execute(
+                "UPDATE users SET avatar_path = ?1, updated_at = ?2 WHERE id = ?3",
+                params![avatar_path, now, user_id],
+            )?;
+        }
+        Ok(())
+    })?;
+    AuditService::log(
+        db,
+        user_id,
+        "profil_modifie",
+        Some("user"),
+        Some(user_id),
+        None,
+    )?;
+    get_profile(db, user_id)
 }
 
 pub fn change_password(

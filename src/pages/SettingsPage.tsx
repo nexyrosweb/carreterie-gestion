@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
-import { apiAuthChangePassword, apiSettingsGet, apiSettingsUpdate, ApiError } from "@/lib/api";
+import {
+  apiAuthChangePassword,
+  apiAuthProfileGet,
+  apiAuthProfileSetAvatar,
+  apiAuthProfileUpdate,
+  apiSettingsGet,
+  apiSettingsUpdate,
+  ApiError,
+} from "@/lib/api";
 import { generateSecurePassword, isPasswordStrongEnough } from "@/lib/password";
-import type { AppSettings, AppSettingsPatch } from "@/types";
+import type { AppSettings, AppSettingsPatch, UserProfile } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { Textarea } from "@/components/ui/Textarea";
 import { TheatreLogo } from "@/components/brand/TheatreLogo";
@@ -15,15 +26,22 @@ export function SettingsPage() {
   const { sessionToken, isDemo } = useAuth();
   const { showToast } = useToast();
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [pwd, setPwd] = useState({ current: "", next: "", confirm: "" });
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
     setLoading(true);
     try {
-      setSettings(await apiSettingsGet(sessionToken));
+      const [s, p] = await Promise.all([
+        apiSettingsGet(sessionToken),
+        apiAuthProfileGet(sessionToken),
+      ]);
+      setSettings(s);
+      setProfile(p);
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Chargement paramètres impossible.", "error");
     } finally {
@@ -43,12 +61,24 @@ export function SettingsPage() {
       theatre_address: settings.theatre_address,
       theatre_siret: settings.theatre_siret,
       theatre_vat_number: settings.theatre_vat_number,
-      logo_path: "brand:logo-theatre-carreterie.jpg",
+      logo_path: settings.logo_path || "brand:logo-theatre-carreterie.jpg",
       invoice_prefix: settings.invoice_prefix,
       credit_note_prefix: settings.credit_note_prefix,
       legal_mentions: settings.legal_mentions,
       default_tax_rate: settings.default_tax_rate,
       export_folder: settings.export_folder,
+      smtp_enabled: settings.smtp_enabled,
+      smtp_host: settings.smtp_host,
+      smtp_port: settings.smtp_port,
+      smtp_encryption: settings.smtp_encryption,
+      smtp_username: settings.smtp_username,
+      smtp_password: settings.smtp_password,
+      smtp_from_name: settings.smtp_from_name,
+      smtp_from_email: settings.smtp_from_email,
+      smtp_reply_to: settings.smtp_reply_to,
+      smtp_cc: settings.smtp_cc,
+      smtp_bcc: settings.smtp_bcc,
+      smtp_timeout_secs: settings.smtp_timeout_secs,
     };
     setSaving(true);
     try {
@@ -58,6 +88,42 @@ export function SettingsPage() {
       showToast(err instanceof ApiError ? err.message : "Enregistrement impossible.", "error");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveProfile(e: FormEvent) {
+    e.preventDefault();
+    if (!sessionToken || !profile || isDemo) return;
+    setSavingProfile(true);
+    try {
+      setProfile(
+        await apiAuthProfileUpdate(sessionToken, {
+          email: profile.email,
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+        }),
+      );
+      showToast("Profil enregistré.", "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Profil non enregistré.", "error");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  async function pickAvatar() {
+    if (!sessionToken || isDemo) return;
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+      title: "Choisir un logo de profil",
+    });
+    if (!selected || Array.isArray(selected)) return;
+    try {
+      setProfile(await apiAuthProfileSetAvatar(sessionToken, selected));
+      showToast("Logo de profil mis à jour.", "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Logo non mis à jour.", "error");
     }
   }
 
@@ -96,11 +162,151 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
+      {profile && !isDemo ? (
+        <form onSubmit={(e) => void saveProfile(e)}>
+          <Card title="Profil">
+            <div className="grid gap-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <ProfileAvatar profile={profile} />
+                <div className="space-y-2">
+                  <p className="text-sm text-[var(--color-text-muted)]">
+                    Identifiant :{" "}
+                    <span className="font-medium text-[var(--color-text)]">{profile.username}</span>
+                  </p>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => void pickAvatar()}>
+                    Changer le logo
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Input
+                  label="Prénom"
+                  value={profile.first_name}
+                  onChange={(e) => setProfile({ ...profile, first_name: e.target.value })}
+                />
+                <Input
+                  label="Nom"
+                  value={profile.last_name}
+                  onChange={(e) => setProfile({ ...profile, last_name: e.target.value })}
+                />
+              </div>
+              <Input
+                label="E-mail"
+                type="email"
+                value={profile.email}
+                onChange={(e) => setProfile({ ...profile, email: e.target.value })}
+              />
+              <Button type="submit" loading={savingProfile}>
+                Enregistrer le profil
+              </Button>
+            </div>
+          </Card>
+        </form>
+      ) : null}
+
       <form onSubmit={(e) => void saveSettings(e)}>
         <Card title="Théâtre et identité">
           <TheatreIdentityFields settings={settings} setSettings={setSettings} />
           <Button type="submit" className="mt-4" loading={saving}>
             Enregistrer
+          </Button>
+        </Card>
+      </form>
+
+      <form onSubmit={(e) => void saveSettings(e)}>
+        <Card title="Serveur SMTP">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm text-[var(--color-text)] sm:col-span-2">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[var(--color-rouge)]"
+                checked={settings.smtp_enabled}
+                onChange={(e) => setSettings({ ...settings, smtp_enabled: e.target.checked })}
+              />
+              Activer l&apos;envoi SMTP
+            </label>
+            <Input
+              label="Hôte SMTP"
+              value={settings.smtp_host}
+              onChange={(e) => setSettings({ ...settings, smtp_host: e.target.value })}
+              placeholder="smtp.exemple.fr"
+            />
+            <Input
+              label="Port"
+              type="number"
+              value={String(settings.smtp_port)}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  smtp_port: Number.parseInt(e.target.value || "587", 10) || 587,
+                })
+              }
+            />
+            <Select
+              label="Chiffrement"
+              value={settings.smtp_encryption}
+              onChange={(e) => setSettings({ ...settings, smtp_encryption: e.target.value })}
+              options={[
+                { value: "none", label: "Aucun" },
+                { value: "starttls", label: "STARTTLS" },
+                { value: "ssl", label: "SSL / TLS" },
+              ]}
+            />
+            <Input
+              label="Délai d'attente (s)"
+              type="number"
+              value={String(settings.smtp_timeout_secs)}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  smtp_timeout_secs: Number.parseInt(e.target.value || "30", 10) || 30,
+                })
+              }
+            />
+            <Input
+              label="Identifiant SMTP"
+              value={settings.smtp_username}
+              onChange={(e) => setSettings({ ...settings, smtp_username: e.target.value })}
+              autoComplete="off"
+            />
+            <Input
+              label="Mot de passe SMTP"
+              type="password"
+              value={settings.smtp_password}
+              onChange={(e) => setSettings({ ...settings, smtp_password: e.target.value })}
+              autoComplete="new-password"
+            />
+            <Input
+              label="Nom de l'expéditeur"
+              value={settings.smtp_from_name}
+              onChange={(e) => setSettings({ ...settings, smtp_from_name: e.target.value })}
+            />
+            <Input
+              label="E-mail de l'expéditeur"
+              type="email"
+              value={settings.smtp_from_email}
+              onChange={(e) => setSettings({ ...settings, smtp_from_email: e.target.value })}
+            />
+            <Input
+              label="Reply-To"
+              type="email"
+              value={settings.smtp_reply_to}
+              onChange={(e) => setSettings({ ...settings, smtp_reply_to: e.target.value })}
+            />
+            <Input
+              label="Cc (séparés par des virgules)"
+              value={settings.smtp_cc}
+              onChange={(e) => setSettings({ ...settings, smtp_cc: e.target.value })}
+            />
+            <Input
+              label="Cci (séparés par des virgules)"
+              value={settings.smtp_bcc}
+              onChange={(e) => setSettings({ ...settings, smtp_bcc: e.target.value })}
+              className="sm:col-span-2"
+            />
+          </div>
+          <Button type="submit" className="mt-4" loading={saving}>
+            Enregistrer le SMTP
           </Button>
         </Card>
       </form>
@@ -178,6 +384,26 @@ export function SettingsPage() {
   );
 }
 
+function ProfileAvatar({ profile }: { profile: UserProfile }) {
+  const initials =
+    `${profile.first_name.charAt(0)}${profile.last_name.charAt(0)}`.toUpperCase() ||
+    profile.username.slice(0, 2).toUpperCase();
+  if (profile.avatar_path) {
+    return (
+      <img
+        src={convertFileSrc(profile.avatar_path)}
+        alt="Logo de profil"
+        className="h-16 w-16 rounded-full object-cover ring-1 ring-[var(--color-border)]"
+      />
+    );
+  }
+  return (
+    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-surface-elevated)] text-sm font-semibold text-[var(--color-or)] ring-1 ring-[var(--color-border)]">
+      {initials}
+    </div>
+  );
+}
+
 function TheatreIdentityFields({
   settings,
   setSettings,
@@ -194,7 +420,7 @@ function TheatreIdentityFields({
         <Input label="N° TVA intracommunautaire" value={settings.theatre_vat_number} onChange={(e) => setSettings({ ...settings, theatre_vat_number: e.target.value })} />
       </div>
       <div>
-        <p className="mb-2 text-sm font-medium text-[var(--color-text)]">Logo</p>
+        <p className="mb-2 text-sm font-medium text-[var(--color-text)]">Logo théâtre</p>
         <TheatreLogo className="max-w-[280px]" />
         <p className="mt-2 text-xs text-[var(--color-text-muted)]">
           Logo officiel Théâtre La Carreterie – utilisé automatiquement sur les PDF.

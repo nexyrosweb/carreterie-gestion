@@ -5,7 +5,7 @@ import { NavLink } from "react-router-dom";
 import { TheatreLogo } from "@/components/brand/TheatreLogo";
 import { useAuth } from "@/context/AuthContext";
 import {
-  readPendingUpdate,
+  readActivePendingUpdate,
   requestUpdateCheckWithPopup,
 } from "@/hooks/useUpdaterCheck";
 import { apiDbPing } from "@/lib/api";
@@ -86,20 +86,20 @@ function DbStatusFooter() {
 
   useEffect(() => {
     const syncPending = () => {
-      setPendingVersion(readPendingUpdate()?.version ?? null);
+      setPendingVersion(readActivePendingUpdate(version)?.version ?? null);
     };
     syncPending();
-    const onAvail = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ version: string }>).detail;
-      setPendingVersion(detail?.version ?? readPendingUpdate()?.version ?? null);
-    };
+    const onAvail = () => syncPending();
+    const onCleared = () => setPendingVersion(null);
     window.addEventListener("carreterie:update-available", onAvail);
+    window.addEventListener("carreterie:update-cleared", onCleared);
     window.addEventListener("storage", syncPending);
     return () => {
       window.removeEventListener("carreterie:update-available", onAvail);
+      window.removeEventListener("carreterie:update-cleared", onCleared);
       window.removeEventListener("storage", syncPending);
     };
-  }, []);
+  }, [version]);
 
   useEffect(() => {
     let cancelled = false;

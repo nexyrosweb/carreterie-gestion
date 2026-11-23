@@ -10,7 +10,10 @@ import {
   getCheckUpdatesOnStartup,
   setLastUpdateCheck,
 } from "@/lib/updaterPrefs";
-import { clearPendingUpdate } from "@/hooks/useUpdaterCheck";
+import {
+  clearPendingUpdate,
+  isNewerVersion,
+} from "@/hooks/useUpdaterCheck";
 
 const DISMISS_KEY = "carreterie_update_dismissed_version";
 
@@ -40,7 +43,22 @@ export function UpdateAvailableModal() {
   const [error, setError] = useState<string | null>(null);
 
   const presentUpdate = useCallback(
-    (u: Update, force = false) => {
+    async (u: Update, force = false) => {
+      let installed = currentVersion;
+      if (!installed) {
+        try {
+          installed = await getVersion();
+          setCurrentVersion(installed);
+        } catch {
+          installed = "";
+        }
+      }
+      if (installed && !isNewerVersion(u.version, installed)) {
+        clearPendingUpdate();
+        setUpdate(null);
+        setOpen(false);
+        return;
+      }
       setUpdate(u);
       try {
         localStorage.setItem(
@@ -61,7 +79,7 @@ export function UpdateAvailableModal() {
         }),
       );
     },
-    [],
+    [currentVersion],
   );
 
   const runCheck = useCallback(
@@ -71,22 +89,55 @@ export function UpdateAvailableModal() {
         const u = await check();
         setLastUpdateCheck(new Date().toLocaleString("fr-FR"));
         if (u) {
-          presentUpdate(u, opts?.forcePopup === true);
+          let installed = currentVersion;
+          if (!installed) {
+            try {
+              installed = await getVersion();
+              setCurrentVersion(installed);
+            } catch {
+              installed = "";
+            }
+          }
+          if (installed && !isNewerVersion(u.version, installed)) {
+            clearPendingUpdate();
+            setUpdate(null);
+            setOpen(false);
+            return { update: null, error: null };
+          }
+          await presentUpdate(u, opts?.forcePopup === true);
           return { update: u, error: null };
         }
         clearPendingUpdate();
+        setUpdate(null);
+        setOpen(false);
         return { update: null, error: null };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return { update: null, error: msg };
       }
     },
-    [presentUpdate],
+    [presentUpdate, currentVersion],
   );
 
   useEffect(() => {
     if (!isTauri()) return;
-    void getVersion().then(setCurrentVersion).catch(() => undefined);
+    void getVersion()
+      .then((v) => {
+        setCurrentVersion(v);
+        // Nettoie une ancienne notif si on est déjà à jour après redémarrage.
+        const raw = localStorage.getItem("carreterie_pending_update");
+        if (raw) {
+          try {
+            const pending = JSON.parse(raw) as { version?: string };
+            if (pending.version && !isNewerVersion(pending.version, v)) {
+              clearPendingUpdate();
+            }
+          } catch {
+            clearPendingUpdate();
+          }
+        }
+      })
+      .catch(() => undefined);
 
     if (getCheckUpdatesOnStartup()) {
       const t = window.setTimeout(() => {

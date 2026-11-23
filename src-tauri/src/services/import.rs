@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{copy, Read, Write};
 use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -7,8 +7,10 @@ use chrono::{NaiveDate, Utc};
 use rusqlite::params;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+use zip::ZipArchive;
 
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
@@ -18,7 +20,7 @@ use crate::models::import::{
 };
 use crate::models::invoice::{InvoiceDraftInput, InvoiceLineInput};
 use crate::models::supplier_invoice::SupplierInvoiceInput;
-use crate::paths::imports_dir;
+use crate::paths::{imports_dir, max_import_bytes};
 use crate::services::audit::AuditService;
 use crate::services::contacts::ContactsService;
 use crate::services::invoices::InvoicesService;
@@ -27,11 +29,30 @@ use crate::services::pdf_text::extract_pdf_text;
 use crate::services::settings::SettingsService;
 use crate::services::suppliers::SuppliersService;
 
-const MAX_PDF_BYTES: u64 = 25 * 1024 * 1024;
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportLimits {
+    pub max_bytes: u64,
+    pub max_mb: u64,
+    pub free_disk_bytes: u64,
+    pub accepted_extensions: Vec<String>,
+    pub accepted_label: String,
+}
 
 pub struct ImportService;
 
 impl ImportService {
+    pub fn limits() -> AppResult<ImportLimits> {
+        let max_bytes = max_import_bytes()?;
+        let free = crate::paths::free_disk_bytes(&imports_dir()?)?;
+        Ok(ImportLimits {
+            max_bytes,
+            max_mb: (max_bytes / (1024 * 1024)).max(1),
+            free_disk_bytes: free,
+            accepted_extensions: vec!["pdf".into(), "zip".into()],
+            accepted_label: "PDF, ZIP (plusieurs PDF)".into(),
+        })
+    }
+
     pub fn analyze_paths(
         db: &DbPool,
         user_id: &str,
@@ -42,10 +63,67 @@ impl ImportService {
             .unwrap_or(ImportDirection::Fournisseur);
         let imports = imports_dir()?;
         fs::create_dir_all(&imports)?;
+        let max_bytes = max_import_bytes()?;
 
         let mut results = Vec::new();
         for path_str in paths {
-            match Self::analyze_one(db, user_id, &path_str, direction, &imports) {
+            let path = PathBuf::from(&path_str);
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+
+            if ext == "zip" {
+                match extract_pdfs_from_zip(&path, max_bytes) {
+                    Ok(pdfs) => {
+                        if pdfs.is_empty() {
+                            results.push(ImportAnalyzeResult {
+                                document: stub_error_document(
+                                    &path_str,
+                                    "Aucune archive PDF trouvée dans le ZIP.",
+                                ),
+                                matches: vec![],
+                                warnings: vec![
+                                    "Le ZIP ne contient aucun fichier .pdf.".to_string(),
+                                ],
+                            });
+                            continue;
+                        }
+                        for pdf_path in pdfs {
+                            let display = pdf_path.display().to_string();
+                            match Self::analyze_one(
+                                db,
+                                user_id,
+                                &display,
+                                direction,
+                                &imports,
+                                max_bytes,
+                            ) {
+                                Ok(r) => results.push(r),
+                                Err(e) => {
+                                    results.push(ImportAnalyzeResult {
+                                        document: stub_error_document(&display, &e.to_string()),
+                                        matches: vec![],
+                                        warnings: vec![e.to_string()],
+                                    });
+                                }
+                            }
+                            let _ = fs::remove_file(&pdf_path);
+                        }
+                    }
+                    Err(e) => {
+                        results.push(ImportAnalyzeResult {
+                            document: stub_error_document(&path_str, &e.to_string()),
+                            matches: vec![],
+                            warnings: vec![e.to_string()],
+                        });
+                    }
+                }
+                continue;
+            }
+
+            match Self::analyze_one(db, user_id, &path_str, direction, &imports, max_bytes) {
                 Ok(r) => results.push(r),
                 Err(e) => {
                     results.push(ImportAnalyzeResult {
@@ -65,9 +143,10 @@ impl ImportService {
         source_path: &str,
         direction: ImportDirection,
         imports: &Path,
+        max_bytes: u64,
     ) -> AppResult<ImportAnalyzeResult> {
         let path = PathBuf::from(source_path);
-        validate_pdf_file(&path)?;
+        validate_pdf_file(&path, max_bytes)?;
         let file_hash = sha256_file(&path)?;
 
         if let Some(existing) = Self::get_by_hash(db, &file_hash)? {
@@ -626,15 +705,16 @@ fn create_linked_supplier(
     Ok(rec.id)
 }
 
-fn validate_pdf_file(path: &Path) -> AppResult<()> {
+fn validate_pdf_file(path: &Path, max_bytes: u64) -> AppResult<()> {
     if !path.is_file() {
         return Err(AppError::validation("Fichier introuvable."));
     }
     let meta = fs::metadata(path)?;
-    if meta.len() > MAX_PDF_BYTES {
-        return Err(AppError::validation(
-            "PDF trop volumineux (maximum 25 Mo).",
-        ));
+    if meta.len() > max_bytes {
+        let max_mb = (max_bytes / (1024 * 1024)).max(1);
+        return Err(AppError::validation(format!(
+            "PDF trop volumineux (maximum {max_mb} Mo selon l'espace disque disponible)."
+        )));
     }
     if meta.len() < 5 {
         return Err(AppError::validation("Fichier trop petit pour être un PDF."));
@@ -648,6 +728,64 @@ fn validate_pdf_file(path: &Path) -> AppResult<()> {
         ));
     }
     Ok(())
+}
+
+fn extract_pdfs_from_zip(zip_path: &Path, max_bytes: u64) -> AppResult<Vec<PathBuf>> {
+    if !zip_path.is_file() {
+        return Err(AppError::validation("Archive ZIP introuvable."));
+    }
+    let meta = fs::metadata(zip_path)?;
+    if meta.len() > max_bytes {
+        let max_mb = (max_bytes / (1024 * 1024)).max(1);
+        return Err(AppError::validation(format!(
+            "ZIP trop volumineux (maximum {max_mb} Mo selon l'espace disque disponible)."
+        )));
+    }
+
+    let file = File::open(zip_path)?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| AppError::validation(format!("ZIP invalide : {e}")))?;
+
+    let staging = imports_dir()?.join(format!("zip-{}", Uuid::new_v4()));
+    fs::create_dir_all(&staging)?;
+
+    let mut out = Vec::new();
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| AppError::validation(format!("Lecture ZIP impossible : {e}")))?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry
+            .enclosed_name()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from(entry.name()));
+        let ext = name
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if ext != "pdf" {
+            continue;
+        }
+        let file_name = name
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("document.pdf");
+        let dest = staging.join(format!("{i}_{file_name}"));
+        {
+            let mut out_file = File::create(&dest)?;
+            copy(&mut entry, &mut out_file)?;
+            out_file.flush()?;
+        }
+        if let Err(e) = validate_pdf_file(&dest, max_bytes) {
+            let _ = fs::remove_file(&dest);
+            return Err(e);
+        }
+        out.push(dest);
+    }
+    Ok(out)
 }
 
 fn sha256_file(path: &Path) -> AppResult<String> {

@@ -16,9 +16,21 @@ pub struct AppSettings {
     pub legal_mentions: String,
     pub default_tax_rate: Decimal,
     pub export_folder: String,
+    pub smtp_enabled: bool,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_encryption: String,
+    pub smtp_username: String,
+    pub smtp_password: String,
+    pub smtp_from_name: String,
+    pub smtp_from_email: String,
+    pub smtp_reply_to: String,
+    pub smtp_cc: String,
+    pub smtp_bcc: String,
+    pub smtp_timeout_secs: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct AppSettingsPatch {
     pub theatre_name: Option<String>,
     pub theatre_address: Option<String>,
@@ -30,4 +42,16 @@ pub struct AppSettingsPatch {
     pub legal_mentions: Option<String>,
     pub default_tax_rate: Option<Decimal>,
     pub export_folder: Option<String>,
+    pub smtp_enabled: Option<bool>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<u16>,
+    pub smtp_encryption: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_from_name: Option<String>,
+    pub smtp_from_email: Option<String>,
+    pub smtp_reply_to: Option<String>,
+    pub smtp_cc: Option<String>,
+    pub smtp_bcc: Option<String>,
+    pub smtp_timeout_secs: Option<u32>,
 }

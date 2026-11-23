@@ -187,6 +187,18 @@ export interface AppSettings {
   legal_mentions: string;
   default_tax_rate: DecimalValue;
   export_folder: string;
+  smtp_enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_encryption: string;
+  smtp_username: string;
+  smtp_password: string;
+  smtp_from_name: string;
+  smtp_from_email: string;
+  smtp_reply_to: string;
+  smtp_cc: string;
+  smtp_bcc: string;
+  smtp_timeout_secs: number;
 }
 
 export interface AppSettingsPatch {
@@ -200,6 +212,42 @@ export interface AppSettingsPatch {
   legal_mentions?: string;
   default_tax_rate?: DecimalValue;
   export_folder?: string;
+  smtp_enabled?: boolean;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtp_encryption?: string;
+  smtp_username?: string;
+  smtp_password?: string;
+  smtp_from_name?: string;
+  smtp_from_email?: string;
+  smtp_reply_to?: string;
+  smtp_cc?: string;
+  smtp_bcc?: string;
+  smtp_timeout_secs?: number;
+}
+
+export interface UserProfile {
+  id: string;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  avatar_path: string;
+}
+
+export interface UserProfilePatch {
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  avatar_path?: string;
+}
+
+export interface ImportLimits {
+  max_bytes: number;
+  max_mb: number;
+  free_disk_bytes: number;
+  accepted_extensions: string[];
+  accepted_label: string;
 }
 
 /** Module import PDF */

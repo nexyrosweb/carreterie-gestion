@@ -4,3 +4,4 @@ pub mod import;
 pub mod invoice;
 pub mod settings;
 pub mod supplier_invoice;
+pub mod user;

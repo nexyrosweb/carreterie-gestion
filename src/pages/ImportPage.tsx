@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
   apiImportAnalyzePdfs,
+  apiImportLimitsGet,
   apiImportList,
   apiImportMatchContacts,
   apiImportPdfData,
@@ -16,6 +17,7 @@ import type {
   ContactMatchCandidate,
   ImportDirection,
   ImportDocumentType,
+  ImportLimits,
   ImportedDocument,
   ImportValidateInput,
 } from "@/types";
@@ -98,6 +100,7 @@ export function ImportPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [createContact, setCreateContact] = useState(false);
+  const [limits, setLimits] = useState<ImportLimits | null>(null);
   const [newContactName, setNewContactName] = useState("");
   const [createLinked, setCreateLinked] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -122,6 +125,13 @@ export function ImportPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!sessionToken) return;
+    void apiImportLimitsGet(sessionToken)
+      .then(setLimits)
+      .catch(() => setLimits(null));
+  }, [sessionToken]);
 
   useEffect(() => {
     return () => {
@@ -175,8 +185,12 @@ export function ImportPage() {
     if (!sessionToken) return;
     const selectedPaths = await open({
       multiple: true,
-      filters: [{ name: "PDF", extensions: ["pdf"] }],
-      title: "Importer des factures PDF",
+      filters: [
+        { name: "PDF ou ZIP", extensions: ["pdf", "zip"] },
+        { name: "PDF", extensions: ["pdf"] },
+        { name: "ZIP", extensions: ["zip"] },
+      ],
+      title: "Importer des factures PDF ou ZIP",
     });
     if (!selectedPaths) return;
     const paths = Array.isArray(selectedPaths) ? selectedPaths : [selectedPaths];
@@ -186,6 +200,11 @@ export function ImportPage() {
     setProgress(10);
     try {
       const results = await apiImportAnalyzePdfs(sessionToken, paths, defaultDirection);
+      try {
+        setLimits(await apiImportLimitsGet(sessionToken));
+      } catch {
+        /* ignore */
+      }
       setProgress(100);
       const warnCount = results.reduce((n, r) => n + r.warnings.length, 0);
       showToast(
@@ -454,11 +473,22 @@ export function ImportPage() {
             ]}
           />
           <Button onClick={() => void pickAndAnalyze()} loading={importing}>
-            Importer des PDF…
+            Importer PDF / ZIP…
           </Button>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Hors ligne – max 25 Mo – doublons détectés par empreinte SHA-256. OCR local via Tesseract si installé.
-          </p>
+          <div className="text-xs text-[var(--color-text-muted)]">
+            <p>
+              Taille maximum :{" "}
+              <span className="font-medium text-[var(--color-text)]">
+                {limits ? `${limits.max_mb} Mo` : "…"}
+              </span>
+            </p>
+            <p>
+              Fichiers acceptés :{" "}
+              <span className="font-medium text-[var(--color-text)]">
+                {limits?.accepted_label ?? "PDF, ZIP"}
+              </span>
+            </p>
+          </div>
         </div>
         {importing ? (
           <div className="mt-3">

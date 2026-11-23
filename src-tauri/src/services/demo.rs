@@ -152,12 +152,11 @@ impl DemoService {
                 theatre_address: Some(settings.theatre_address),
                 theatre_siret: Some(settings.theatre_siret),
                 theatre_vat_number: Some(settings.theatre_vat_number),
-                logo_path: None,
                 invoice_prefix: Some("DEMO-".into()),
                 credit_note_prefix: Some("DEMO-AV-".into()),
                 legal_mentions: Some(settings.legal_mentions),
                 default_tax_rate: Some(dec!(20)),
-                export_folder: None,
+                ..Default::default()
             },
         )?;
 
