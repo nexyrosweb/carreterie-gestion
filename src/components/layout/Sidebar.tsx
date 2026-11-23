@@ -1,7 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { isTauri } from "@tauri-apps/api/core";
 import { NavLink } from "react-router-dom";
 import { TheatreLogo } from "@/components/brand/TheatreLogo";
 import { useAuth } from "@/context/AuthContext";
+import {
+  readPendingUpdate,
+  requestUpdateCheckWithPopup,
+} from "@/hooks/useUpdaterCheck";
 import { apiDbPing } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
@@ -14,6 +20,7 @@ const modules = [
   { to: "/archives", label: "Archives", icon: IconArchives },
   { to: "/sauvegardes", label: "Sauvegardes", icon: IconBackup },
   { to: "/parametres", label: "Paramètres", icon: IconSettings },
+  { to: "/a-propos", label: "À propos", icon: IconAbout },
 ] as const;
 
 export function Sidebar() {
@@ -66,6 +73,33 @@ export function Sidebar() {
 function DbStatusFooter() {
   const { sessionToken, isDemo } = useAuth();
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [version, setVersion] = useState("…");
+  const [pendingVersion, setPendingVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isTauri()) {
+      setVersion("dev");
+      return;
+    }
+    void getVersion().then(setVersion).catch(() => setVersion("?"));
+  }, []);
+
+  useEffect(() => {
+    const syncPending = () => {
+      setPendingVersion(readPendingUpdate()?.version ?? null);
+    };
+    syncPending();
+    const onAvail = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ version: string }>).detail;
+      setPendingVersion(detail?.version ?? readPendingUpdate()?.version ?? null);
+    };
+    window.addEventListener("carreterie:update-available", onAvail);
+    window.addEventListener("storage", syncPending);
+    return () => {
+      window.removeEventListener("carreterie:update-available", onAvail);
+      window.removeEventListener("storage", syncPending);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,27 +126,61 @@ function DbStatusFooter() {
     connected === true ? "Connecté" : connected === false ? "Déconnecté" : "Vérification…";
 
   return (
-    <p
-      className="flex items-center gap-2 border-t border-[var(--color-border)] px-4 py-3 text-[10px] text-[var(--color-text-muted)]"
-      role="status"
-      aria-live="polite"
-    >
-      <span
+    <div className="border-t border-[var(--color-border)] px-3 py-3">
+      <button
+        type="button"
+        onClick={() => requestUpdateCheckWithPopup()}
         className={cn(
-          "inline-block h-2 w-2 shrink-0 rounded-full",
-          connected === true && "bg-[var(--color-success)]",
-          connected === false && "bg-[var(--color-danger)]",
-          connected === null && "bg-[var(--color-text-muted)]",
+          "mb-2 flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left transition",
+          pendingVersion
+            ? "border-[var(--color-or)]/50 bg-[var(--color-or)]/10 hover:bg-[var(--color-or)]/20"
+            : "border-[var(--color-border)] bg-[var(--color-surface-elevated)] hover:border-[var(--color-or)]/40",
         )}
-        aria-hidden
-      />
-      <span>{label}</span>
-      {connected === true ? (
-        <span className="text-[var(--color-text-muted)]">
-          · {isDemo ? "demo.db" : "Base locale"}
+        title={
+          pendingVersion
+            ? `Mise à jour ${pendingVersion} disponible — cliquer pour installer`
+            : "Rechercher des mises à jour"
+        }
+      >
+        <span className="min-w-0">
+          <span className="block text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+            Version
+          </span>
+          <span className="block truncate text-xs font-semibold text-[var(--color-text)]">
+            v{version}
+          </span>
         </span>
-      ) : null}
-    </p>
+        {pendingVersion ? (
+          <span className="shrink-0 rounded bg-[var(--color-or)]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-or)]">
+            → {pendingVersion}
+          </span>
+        ) : (
+          <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">MAJ</span>
+        )}
+      </button>
+
+      <p
+        className="flex items-center gap-2 px-0.5 text-[10px] text-[var(--color-text-muted)]"
+        role="status"
+        aria-live="polite"
+      >
+        <span
+          className={cn(
+            "inline-block h-2 w-2 shrink-0 rounded-full",
+            connected === true && "bg-[var(--color-success)]",
+            connected === false && "bg-[var(--color-danger)]",
+            connected === null && "bg-[var(--color-text-muted)]",
+          )}
+          aria-hidden
+        />
+        <span>{label}</span>
+        {connected === true ? (
+          <span className="text-[var(--color-text-muted)]">
+            · {isDemo ? "demo.db" : "Base locale"}
+          </span>
+        ) : null}
+      </p>
+    </div>
   );
 }
 
@@ -219,6 +287,16 @@ function IconSettings({ className }: IconProps) {
     <>
       <circle cx="12" cy="12" r="3" />
       <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </>,
+    className,
+  );
+}
+
+function IconAbout({ className }: IconProps) {
+  return iconShell(
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 10v6M12 7h.01" />
     </>,
     className,
   );
