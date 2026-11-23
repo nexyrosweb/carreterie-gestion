@@ -1,5 +1,7 @@
-# Publication Windows NSIS + artefacts updater signés (dépôt de distribution).
-# Ne publie jamais sans validation manuelle (workflow_dispatch ou tag + environment).
+# Publication Windows NSIS + artefacts updater signés.
+# Secrets requis (repository) :
+#   TAURI_SIGNING_PRIVATE_KEY          — contenu du fichier .key (une ligne base64)
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD — mot de passe de la clé (obligatoire si clé chiffrée)
 
 name: Release Windows
 
@@ -24,7 +26,6 @@ concurrency:
 jobs:
   publish:
     runs-on: windows-latest
-    environment: release
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,12 +42,33 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
+      # Évite les secrets multilignes malformés sous Windows : on écrit un fichier clé.
+      - name: Prepare updater signing key
+        shell: pwsh
+        env:
+          RAW_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          RAW_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RAW_KEY)) {
+            throw "Secret TAURI_SIGNING_PRIVATE_KEY manquant ou vide."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:RAW_PASSWORD)) {
+            throw "Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD manquant. La clé locale est chiffrée : le mot de passe est obligatoire."
+          }
+          $keyPath = Join-Path $env:RUNNER_TEMP "tauri-updater.key"
+          # Une seule ligne (format rsign) — pas de BOM
+          $content = $env:RAW_KEY.Trim().Replace("`r", "").Replace("`n", "")
+          [System.IO.File]::WriteAllText($keyPath, $content)
+          Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNING_PRIVATE_KEY=$keyPath"
+          Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$($env:RAW_PASSWORD)"
+          Write-Host "Clé updater écrite ($((Get-Item $keyPath).Length) octets)."
+
       - name: Build & publish
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: "Carreterie Gestion ${{ github.event.inputs.tag || github.ref_name }}"

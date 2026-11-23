@@ -24,10 +24,18 @@ L’installateur NSIS n’écrit pas dans AppData ; les migrations SQLite sont v
 1. Générer une paire (une seule fois) :  
    `npx tauri signer generate -w .keys/carreterie.key -p "<mot-de-passe>"`
 2. Copier la **clé publique** dans `tauri.conf.json` → `plugins.updater.pubkey`
-3. Stocker en GitHub Actions Secrets (jamais dans le dépôt) :
-   - `TAURI_SIGNING_PRIVATE_KEY` (contenu du fichier `.key`)
-   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-4. Environment GitHub `release` avec reviewers obligatoires
+3. Stocker en **Repository secrets** GitHub (Settings → Secrets → Actions), **pas** seulement dans un Environment :
+
+```powershell
+# Depuis la racine du projet (PowerShell)
+gh secret set TAURI_SIGNING_PRIVATE_KEY -R nexyrosweb/carreterie-gestion < .keys/carreterie.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD -R nexyrosweb/carreterie-gestion -b "VOTRE_MOT_DE_PASSE"
+```
+
+Erreur CI `Missing comment in secret key` / `incorrect updater private key password` :
+- secret clé vide, tronqué, ou collé avec des retours à la ligne en trop ;
+- **mot de passe absent ou incorrect** (la clé générée localement est chiffrée) ;
+- secrets placés dans un Environment GitHub alors que le job n’y a pas accès.
 
 TLS et vérification de signature restent actifs en production.
 
