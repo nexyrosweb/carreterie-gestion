@@ -179,8 +179,8 @@ export function UpdateAvailableModal() {
       {update ? (
         <div className="space-y-3 text-sm text-[var(--color-text)]">
           <p>
-            Une nouvelle version de <strong>Carreterie Gestion</strong> est disponible sur
-            GitHub.
+            Une nouvelle version de <strong>Carreterie Gestion</strong> est disponible.
+            Installez-la pour bénéficier des dernières corrections Nexyros.
           </p>
           <dl className="grid gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs">
             <div className="flex justify-between gap-3">

@@ -40,7 +40,7 @@ export function AboutPage() {
         <div>
           <h2 className="text-xl font-bold text-[var(--color-text)]">Carreterie Gestion</h2>
           <p className="text-sm text-[var(--color-text-muted)]">
-            Gestion locale pour le Théâtre La Carreterie
+            Gestion locale pour le Théâtre La Carreterie · mises à jour automatiques
           </p>
         </div>
       </header>
