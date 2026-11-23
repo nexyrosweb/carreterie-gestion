@@ -34,6 +34,7 @@ impl InvoiceStatus {
 pub enum InvoiceKind {
     Facture,
     Avoir,
+    Devis,
 }
 
 impl InvoiceKind {
@@ -41,6 +42,7 @@ impl InvoiceKind {
         match self {
             InvoiceKind::Facture => "facture",
             InvoiceKind::Avoir => "avoir",
+            InvoiceKind::Devis => "devis",
         }
     }
 
@@ -48,7 +50,16 @@ impl InvoiceKind {
         match s {
             "facture" => Some(InvoiceKind::Facture),
             "avoir" => Some(InvoiceKind::Avoir),
+            "devis" => Some(InvoiceKind::Devis),
             _ => None,
+        }
+    }
+
+    pub fn document_title(&self) -> &'static str {
+        match self {
+            InvoiceKind::Facture => "Facture",
+            InvoiceKind::Avoir => "Avoir",
+            InvoiceKind::Devis => "Devis",
         }
     }
 }
@@ -114,4 +125,20 @@ pub struct InvoiceDraftInput {
     pub due_date: Option<NaiveDate>,
     pub customer_notes: Option<String>,
     pub lines: Vec<InvoiceLineInput>,
+    /// `facture` (défaut) ou `devis`.
+    #[serde(default)]
+    pub invoice_kind: Option<InvoiceKind>,
+}
+
+impl Default for InvoiceDraftInput {
+    fn default() -> Self {
+        Self {
+            contact_id: String::new(),
+            issue_date: None,
+            due_date: None,
+            customer_notes: None,
+            lines: Vec::new(),
+            invoice_kind: None,
+        }
+    }
 }

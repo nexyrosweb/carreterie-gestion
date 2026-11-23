@@ -14,6 +14,7 @@ import { cn } from "@/lib/cn";
 const modules = [
   { to: "/", label: "Tableau de bord", end: true, icon: IconDashboard },
   { to: "/factures-clients", label: "Factures clients", icon: IconInvoice },
+  { to: "/devis", label: "Devis", icon: IconQuote },
   { to: "/factures-fournisseurs", label: "Factures fournisseurs", icon: IconSupplier },
   { to: "/import-pdf", label: "Import PDF", icon: IconImport },
   { to: "/contacts", label: "Contacts", icon: IconContacts },
@@ -230,6 +231,18 @@ function IconInvoice({ className }: IconProps) {
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
       <path d="M14 2v6h6" />
       <path d="M8 13h8M8 17h5" />
+    </>,
+    className,
+  );
+}
+
+function IconQuote({ className }: IconProps) {
+  return iconShell(
+    <>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M8 12h8M8 16h6" />
+      <path d="M9 9h2" />
     </>,
     className,
   );

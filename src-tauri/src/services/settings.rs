@@ -72,6 +72,9 @@ impl SettingsService {
                 smtp_cc: Self::get_key_or(conn, "smtp_cc", ""),
                 smtp_bcc: Self::get_key_or(conn, "smtp_bcc", ""),
                 smtp_timeout_secs: smtp_timeout,
+                devis_prefix: Self::get_key_or(conn, "devis_prefix", "DV-"),
+                bank_iban: Self::get_key_or(conn, "bank_iban", ""),
+                bank_account: Self::get_key_or(conn, "bank_account", ""),
             })
         })
     }
@@ -144,6 +147,15 @@ impl SettingsService {
             if let Some(v) = patch.smtp_timeout_secs {
                 Self::set_key(conn, "smtp_timeout_secs", &v.to_string())?;
             }
+            if let Some(v) = patch.devis_prefix {
+                Self::set_key(conn, "devis_prefix", &v)?;
+            }
+            if let Some(v) = patch.bank_iban {
+                Self::set_key(conn, "bank_iban", &v)?;
+            }
+            if let Some(v) = patch.bank_account {
+                Self::set_key(conn, "bank_account", &v)?;
+            }
             Ok(())
         })?;
         AuditService::log(
@@ -157,32 +169,37 @@ impl SettingsService {
         Self::load(db)
     }
 
+    #[allow(dead_code)]
     pub fn next_invoice_number(conn: &mut rusqlite::Connection, is_credit: bool) -> AppResult<String> {
+        if is_credit {
+            Self::next_document_number(conn, "avoir")
+        } else {
+            Self::next_document_number(conn, "facture")
+        }
+    }
+
+    pub fn next_document_number(conn: &mut rusqlite::Connection, kind: &str) -> AppResult<String> {
         let year = Utc::now().format("%Y").to_string();
         let stored_year = Self::get_key(conn, "invoice_year")?;
         if stored_year != year {
             Self::set_key(conn, "invoice_year", &year)?;
             Self::set_key(conn, "invoice_last_sequence", "0")?;
             Self::set_key(conn, "credit_note_last_sequence", "0")?;
+            Self::set_key(conn, "devis_last_sequence", "0")?;
         }
 
-        let (seq_key, prefix) = if is_credit {
-            (
-                "credit_note_last_sequence",
-                Self::get_key(conn, "credit_note_prefix")?,
-            )
-        } else {
-            (
-                "invoice_last_sequence",
-                Self::get_key(conn, "invoice_prefix")?,
-            )
+        let (seq_key, prefix_key, default_prefix) = match kind {
+            "avoir" => ("credit_note_last_sequence", "credit_note_prefix", "AV-"),
+            "devis" => ("devis_last_sequence", "devis_prefix", "DV-"),
+            _ => ("invoice_last_sequence", "invoice_prefix", "FA-"),
         };
 
-        let mut seq: u32 = Self::get_key(conn, seq_key)?.parse().unwrap_or(0);
+        let prefix = Self::get_key_or(conn, prefix_key, default_prefix);
+        let mut seq: u32 = Self::get_key_or(conn, seq_key, "0").parse().unwrap_or(0);
         seq += 1;
         Self::set_key(conn, seq_key, &seq.to_string())?;
 
-        Ok(format!("{}{year}-{seq:04}", prefix))
+        Ok(format!("{prefix}{year}-{seq:04}"))
     }
 
     pub fn get_default_tax(db: &DbPool) -> AppResult<Decimal> {

@@ -10,6 +10,7 @@ import {
   apiInvoicesGet,
   apiInvoicesIssue,
   apiInvoicesList,
+  apiInvoicesPreviewPdf,
   apiInvoicesRecordPayment,
   apiInvoicesUpdateDraft,
   ApiError,
@@ -21,7 +22,14 @@ import {
   parseMoney,
   sumLines,
 } from "@/lib/money";
-import type { Contact, Invoice, InvoiceDraftInput, InvoiceLine, InvoiceLineInput } from "@/types";
+import type {
+  Contact,
+  Invoice,
+  InvoiceDraftInput,
+  InvoiceKind,
+  InvoiceLine,
+  InvoiceLineInput,
+} from "@/types";
 import { Badge, invoiceStatusBadge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -56,7 +64,13 @@ function isClientContact(c: Contact): boolean {
   return c.kind === "client" || c.kind === "les_deux";
 }
 
-export function ClientInvoicesPage() {
+export function ClientInvoicesPage({
+  documentKind = "facture",
+}: {
+  documentKind?: Extract<InvoiceKind, "facture" | "devis">;
+}) {
+  const isDevis = documentKind === "devis";
+  const docLabel = isDevis ? "devis" : "facture";
   const { sessionToken } = useAuth();
   const { showToast } = useToast();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -70,6 +84,7 @@ export function ClientInvoicesPage() {
     lines: [defaultLine()],
     due_date: "",
     customer_notes: "",
+    invoice_kind: documentKind,
   });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -78,6 +93,8 @@ export function ClientInvoicesPage() {
   const [paymentDate, setPaymentDate] = useState(
     () => new Date().toISOString().slice(0, 10),
   );
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const clientNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -90,18 +107,21 @@ export function ClientInvoicesPage() {
     setLoading(true);
     try {
       const [inv, allContacts] = await Promise.all([
-        apiInvoicesList(sessionToken, filter || undefined),
+        apiInvoicesList(sessionToken, filter || undefined, documentKind),
         apiContactsList(sessionToken),
       ]);
       setInvoices(inv);
       setClients(allContacts.filter(isClientContact));
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Erreur chargement factures.", "error");
+      showToast(
+        err instanceof ApiError ? err.message : `Erreur chargement ${docLabel}s.`,
+        "error",
+      );
       setInvoices([]);
     } finally {
       setLoading(false);
     }
-  }, [sessionToken, filter, showToast]);
+  }, [sessionToken, filter, showToast, documentKind, docLabel]);
 
   useEffect(() => {
     void load();
@@ -127,6 +147,7 @@ export function ClientInvoicesPage() {
       issue_date: "",
       due_date: "",
       customer_notes: "",
+      invoice_kind: documentKind,
     });
     setEditorOpen(true);
   }
@@ -135,8 +156,15 @@ export function ClientInvoicesPage() {
     if (!sessionToken) return;
     try {
       setDetail(await apiInvoicesGet(sessionToken, inv.id));
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Impossible d'ouvrir la facture.", "error");
+      showToast(
+        err instanceof ApiError ? err.message : `Impossible d'ouvrir le ${docLabel}.`,
+        "error",
+      );
     }
   }
 
@@ -148,6 +176,7 @@ export function ClientInvoicesPage() {
       due_date: inv.due_date ?? "",
       customer_notes: inv.customer_notes ?? "",
       lines: inv.lines.length ? inv.lines.map(lineToInput) : [defaultLine()],
+      invoice_kind: documentKind,
     });
     setEditorOpen(true);
   }
@@ -190,6 +219,7 @@ export function ClientInvoicesPage() {
         issue_date: draftForm.issue_date || undefined,
         due_date: draftForm.due_date || undefined,
         customer_notes: draftForm.customer_notes || undefined,
+        invoice_kind: documentKind,
       };
       if (editingId) {
         await apiInvoicesUpdateDraft(sessionToken, editingId, input);
@@ -234,7 +264,7 @@ export function ClientInvoicesPage() {
     if (!sessionToken) return;
     try {
       await apiInvoicesIssue(sessionToken, id);
-      showToast("Facture émise.", "success");
+      showToast(isDevis ? "Devis émis." : "Facture émise.", "success");
       await load();
       if (detail?.id === id) {
         setDetail(await apiInvoicesGet(sessionToken, id));
@@ -251,6 +281,26 @@ export function ClientInvoicesPage() {
       showToast(`PDF généré : ${path}`, "success");
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Génération PDF impossible.", "error");
+    }
+  }
+
+  async function showPreview(id: string) {
+    if (!sessionToken) return;
+    setPreviewLoading(true);
+    try {
+      const b64 = await apiInvoicesPreviewPdf(sessionToken, id);
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(blob);
+      });
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Aperçu PDF impossible.", "error");
+    } finally {
+      setPreviewLoading(false);
     }
   }
 
@@ -290,17 +340,25 @@ export function ClientInvoicesPage() {
           label="Filtrer par statut"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          options={[
-            { value: "", label: "Toutes" },
-            { value: "brouillon", label: "Brouillons" },
-            { value: "emise", label: "Émises" },
-            { value: "avoir", label: "Avoirs" },
-          ]}
+          options={
+            isDevis
+              ? [
+                  { value: "", label: "Tous" },
+                  { value: "brouillon", label: "Brouillons" },
+                  { value: "emise", label: "Émis" },
+                ]
+              : [
+                  { value: "", label: "Toutes" },
+                  { value: "brouillon", label: "Brouillons" },
+                  { value: "emise", label: "Émises" },
+                  { value: "avoir", label: "Avoirs" },
+                ]
+          }
           className="min-w-[12rem]"
         />
         <div className="flex-1" />
         <Button onClick={openNewDraft} disabled={clients.length === 0}>
-          Nouveau brouillon
+          {isDevis ? "Nouveau devis" : "Nouveau brouillon"}
         </Button>
       </div>
 
@@ -308,7 +366,14 @@ export function ClientInvoicesPage() {
         {loading ? (
           <Spinner className="mx-auto py-12 text-[var(--color-or)]" />
         ) : invoices.length === 0 ? (
-          <EmptyState title="Aucune facture" description="Créez un brouillon pour commencer." />
+          <EmptyState
+            title={isDevis ? "Aucun devis" : "Aucune facture"}
+            description={
+              isDevis
+                ? "Créez un devis pour commencer."
+                : "Créez un brouillon pour commencer."
+            }
+          />
         ) : (
           <Table>
             <THead>
@@ -362,7 +427,15 @@ export function ClientInvoicesPage() {
       <Modal
         open={editorOpen}
         onClose={() => setEditorOpen(false)}
-        title={editingId ? "Modifier le brouillon" : "Nouveau brouillon"}
+        title={
+          editingId
+            ? isDevis
+              ? "Modifier le devis"
+              : "Modifier le brouillon"
+            : isDevis
+              ? "Nouveau devis"
+              : "Nouveau brouillon"
+        }
         size="xl"
         footer={
           <>
@@ -390,17 +463,22 @@ export function ClientInvoicesPage() {
               onChange={(e) => setDraftForm({ ...draftForm, issue_date: e.target.value })}
             />
             <Input
-              label="Échéance"
+              label={isDevis ? "Validité" : "Échéance"}
               type="date"
               value={draftForm.due_date ?? ""}
               onChange={(e) => setDraftForm({ ...draftForm, due_date: e.target.value })}
             />
           </div>
-          <Textarea
-            label="Notes client"
-            value={draftForm.customer_notes ?? ""}
-            onChange={(e) => setDraftForm({ ...draftForm, customer_notes: e.target.value })}
-          />
+          <div>
+            <Textarea
+              label={isDevis ? "Prestation / notes" : "Notes client / prestation"}
+              value={draftForm.customer_notes ?? ""}
+              onChange={(e) => setDraftForm({ ...draftForm, customer_notes: e.target.value })}
+            />
+            <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              Affiché sur le PDF (ex. Location salle, juillet 2026)
+            </p>
+          </div>
 
           <Table>
             <THead>
@@ -481,12 +559,31 @@ export function ClientInvoicesPage() {
 
       <Modal
         open={detail != null}
-        onClose={() => setDetail(null)}
-        title={detail?.number ? `Facture ${detail.number}` : "Facture"}
-        size="lg"
+        onClose={() => {
+          setDetail(null);
+          setPreviewUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return null;
+          });
+        }}
+        title={
+          detail?.number
+            ? `${isDevis ? "Devis" : detail.invoice_kind === "avoir" ? "Avoir" : "Facture"} ${detail.number}`
+            : isDevis
+              ? "Devis"
+              : "Facture"
+        }
+        size="xl"
         footer={
           detail ? (
             <>
+              <Button
+                variant="secondary"
+                loading={previewLoading}
+                onClick={() => void showPreview(detail.id)}
+              >
+                Aperçu
+              </Button>
               {detail.status === "brouillon" ? (
                 <>
                   <Button variant="danger" onClick={() => setDeleteTarget(detail.id)}>
@@ -498,14 +595,16 @@ export function ClientInvoicesPage() {
                   <Button onClick={() => void issueInvoice(detail.id)}>Émettre</Button>
                 </>
               ) : null}
-              {detail.status === "emise" ? (
+              {detail.status === "emise" || detail.status === "avoir" ? (
                 <>
                   <Button variant="gold" onClick={() => void generatePdf(detail.id)}>
-                    PDF
+                    Enregistrer PDF
                   </Button>
-                  <Button variant="danger" onClick={() => void createCreditNote(detail)}>
-                    Avoir
-                  </Button>
+                  {!isDevis && detail.status === "emise" && detail.invoice_kind !== "devis" ? (
+                    <Button variant="danger" onClick={() => void createCreditNote(detail)}>
+                      Avoir
+                    </Button>
+                  ) : null}
                 </>
               ) : null}
             </>
@@ -527,7 +626,7 @@ export function ClientInvoicesPage() {
               Totaux : HT {formatMoneyDecimal(detail.total_ht)} – TVA{" "}
               {formatMoneyDecimal(detail.total_tva)} – TTC {formatMoneyDecimal(detail.total_ttc)}
             </p>
-            {detail.status === "emise" ? (
+            {!isDevis && detail.status === "emise" ? (
               <p className="text-xs text-[var(--color-text-muted)]">
                 Payé : {formatMoneyDecimal(detail.amount_paid ?? 0)} – Statut paiement :{" "}
                 {detail.payment_status ?? "impayee"}
@@ -536,7 +635,20 @@ export function ClientInvoicesPage() {
             {detail.customer_notes ? (
               <p className="text-xs text-[var(--color-text-muted)]">{detail.customer_notes}</p>
             ) : null}
-            {detail.status === "emise" && detail.payment_status !== "payee" ? (
+
+            {previewUrl ? (
+              <iframe
+                title="Aperçu PDF"
+                src={previewUrl}
+                className="mt-2 h-[28rem] w-full rounded border border-[var(--color-border)] bg-white"
+              />
+            ) : (
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Cliquez sur « Aperçu » pour visualiser le document au format du modèle.
+              </p>
+            )}
+
+            {!isDevis && detail.status === "emise" && detail.payment_status !== "payee" ? (
               <div className="mt-3 grid gap-2 border-t border-[var(--color-border)] pt-3 sm:grid-cols-3">
                 <Input
                   label="Montant règlement"

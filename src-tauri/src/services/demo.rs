@@ -243,6 +243,7 @@ impl DemoService {
                         tax_rate_percent: dec!(20),
                     },
                 ],
+                invoice_kind: None,
             },
         )?;
         let issued = InvoicesService::issue(db, &user.id, &draft.id)?;
@@ -275,6 +276,7 @@ impl DemoService {
                     unit_price_ht: dec!(120.00),
                     tax_rate_percent: dec!(5.5),
                 }],
+                invoice_kind: None,
             },
         )?;
         let issued2 = InvoicesService::issue(db, &user.id, &draft2.id)?;
@@ -308,6 +310,7 @@ impl DemoService {
                     unit_price_ht: dec!(90.00),
                     tax_rate_percent: dec!(20),
                 }],
+                invoice_kind: None,
             },
         )?;
 

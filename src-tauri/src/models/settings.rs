@@ -28,6 +28,9 @@ pub struct AppSettings {
     pub smtp_cc: String,
     pub smtp_bcc: String,
     pub smtp_timeout_secs: u32,
+    pub devis_prefix: String,
+    pub bank_iban: String,
+    pub bank_account: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -54,4 +57,7 @@ pub struct AppSettingsPatch {
     pub smtp_cc: Option<String>,
     pub smtp_bcc: Option<String>,
     pub smtp_timeout_secs: Option<u32>,
+    pub devis_prefix: Option<String>,
+    pub bank_iban: Option<String>,
+    pub bank_account: Option<String>,
 }

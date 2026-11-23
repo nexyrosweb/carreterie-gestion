@@ -13,6 +13,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { ImportPage } from "@/pages/ImportPage";
 import { LockScreen } from "@/pages/LockScreen";
 import { LoginPage } from "@/pages/LoginPage";
+import { QuotesPage } from "@/pages/QuotesPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SupplierInvoicesPage } from "@/pages/SupplierInvoicesPage";
 
@@ -38,6 +39,7 @@ function ProtectedRoutes() {
         <Route element={<AppShell />}>
           <Route index element={<DashboardPage />} />
           <Route path="factures-clients" element={<ClientInvoicesPage />} />
+          <Route path="devis" element={<QuotesPage />} />
           <Route path="factures-fournisseurs" element={<SupplierInvoicesPage />} />
           <Route path="import-pdf" element={<ImportPage />} />
           <Route path="contacts" element={<ContactsPage />} />

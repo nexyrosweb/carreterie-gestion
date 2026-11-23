@@ -5,7 +5,7 @@ use crate::db::DbPool;
 use crate::error::{AppResult, ErrorPayload};
 use crate::models::contact::{Contact, ContactInput};
 use crate::models::invoice::{
-    Invoice, InvoiceDraftInput, InvoiceLineInput, InvoiceStatus, RecordPaymentInput,
+    Invoice, InvoiceDraftInput, InvoiceKind, InvoiceLineInput, InvoiceStatus, RecordPaymentInput,
 };
 use crate::models::settings::{AppSettings, AppSettingsPatch};
 use crate::models::user::{UserProfile, UserProfilePatch};
@@ -351,10 +351,12 @@ pub fn invoices_list(
     state: tauri::State<'_, AppState>,
     session_token: String,
     status: Option<String>,
+    kind: Option<String>,
 ) -> Result<Vec<Invoice>, ErrorPayload> {
     authed(&state, &session_token, |_u, db| {
         let st = status.as_deref().and_then(InvoiceStatus::from_db_str);
-        InvoicesService::list(db, st)
+        let kd = kind.as_deref().and_then(InvoiceKind::from_db_str);
+        InvoicesService::list(db, st, kd)
     })
 }
 
@@ -441,6 +443,17 @@ pub fn invoices_generate_pdf(
         let path = PdfService::generate_invoice_pdf(db, &id, user.is_demo)?;
         paths::assert_path_inside_active_root(&path)?;
         Ok(path.to_string_lossy().to_string())
+    })
+}
+
+#[tauri::command]
+pub fn invoices_preview_pdf(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    id: String,
+) -> Result<String, ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        PdfService::generate_invoice_pdf_base64(db, &id, user.is_demo)
     })
 }
 

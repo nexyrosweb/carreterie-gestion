@@ -6,7 +6,7 @@ export type ContactKind = "client" | "fournisseur" | "les_deux";
 
 export type InvoiceStatus = "brouillon" | "emise" | "avoir";
 
-export type InvoiceKind = "facture" | "avoir";
+export type InvoiceKind = "facture" | "avoir" | "devis";
 
 export interface ErrorPayload {
   message: string;
@@ -116,6 +116,7 @@ export interface InvoiceDraftInput {
   due_date?: string;
   customer_notes?: string;
   lines: InvoiceLineInput[];
+  invoice_kind?: InvoiceKind;
 }
 
 export interface SupplierInvoice {
@@ -199,6 +200,9 @@ export interface AppSettings {
   smtp_cc: string;
   smtp_bcc: string;
   smtp_timeout_secs: number;
+  devis_prefix: string;
+  bank_iban: string;
+  bank_account: string;
 }
 
 export interface AppSettingsPatch {
@@ -224,6 +228,9 @@ export interface AppSettingsPatch {
   smtp_cc?: string;
   smtp_bcc?: string;
   smtp_timeout_secs?: number;
+  devis_prefix?: string;
+  bank_iban?: string;
+  bank_account?: string;
 }
 
 export interface UserProfile {

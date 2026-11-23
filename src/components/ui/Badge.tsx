@@ -36,7 +36,7 @@ export function Badge({
 export function invoiceStatusBadge(status: string): { label: string; tone: Tone } {
   const map: Record<string, { label: string; tone: Tone }> = {
     brouillon: { label: "Brouillon", tone: "muted" },
-    emise: { label: "Émise", tone: "gold" },
+    emise: { label: "Émis", tone: "gold" },
     avoir: { label: "Avoir", tone: "red" },
   };
   return map[status] ?? { label: status, tone: "default" };

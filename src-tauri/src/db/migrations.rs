@@ -220,6 +220,63 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('smtp_timeout_secs', '30');
 INSERT OR IGNORE INTO schema_version (version) VALUES (4);
 "#;
 
+const MIGRATION_V5: &str = r#"
+PRAGMA foreign_keys=OFF;
+
+CREATE TABLE invoices_v5 (
+    id TEXT NOT NULL PRIMARY KEY,
+    number TEXT UNIQUE,
+    contact_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('brouillon', 'emise', 'avoir')),
+    invoice_kind TEXT NOT NULL DEFAULT 'facture' CHECK (invoice_kind IN ('facture', 'avoir', 'devis')),
+    related_invoice_id TEXT,
+    issue_date TEXT,
+    due_date TEXT,
+    customer_notes TEXT,
+    total_ht TEXT NOT NULL DEFAULT '0.00',
+    total_tva TEXT NOT NULL DEFAULT '0.00',
+    total_ttc TEXT NOT NULL DEFAULT '0.00',
+    amount_paid TEXT NOT NULL DEFAULT '0.00',
+    payment_status TEXT NOT NULL DEFAULT 'impayee',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    issued_at TEXT,
+    CHECK (
+        (status = 'brouillon' AND number IS NULL)
+        OR (status IN ('emise', 'avoir') AND number IS NOT NULL)
+    )
+);
+
+INSERT INTO invoices_v5 (
+    id, number, contact_id, status, invoice_kind, related_invoice_id,
+    issue_date, due_date, customer_notes, total_ht, total_tva, total_ttc,
+    amount_paid, payment_status, created_at, updated_at, issued_at
+)
+SELECT
+    id, number, contact_id, status, invoice_kind, related_invoice_id,
+    issue_date, due_date, customer_notes, total_ht, total_tva, total_ttc,
+    COALESCE(amount_paid, '0.00'), COALESCE(payment_status, 'impayee'),
+    created_at, updated_at, issued_at
+FROM invoices;
+
+DROP TABLE invoices;
+ALTER TABLE invoices_v5 RENAME TO invoices;
+
+CREATE INDEX IF NOT EXISTS idx_invoices_contact ON invoices(contact_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
+CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(number);
+CREATE INDEX IF NOT EXISTS idx_invoices_kind ON invoices(invoice_kind);
+
+INSERT OR IGNORE INTO settings (key, value) VALUES ('devis_prefix', 'DV-');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('devis_last_sequence', '0');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('bank_iban', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('bank_account', '');
+
+INSERT OR IGNORE INTO schema_version (version) VALUES (5);
+
+PRAGMA foreign_keys=ON;
+"#;
+
 pub fn run_migrations(conn: &Connection) -> AppResult<()> {
     let version: i64 = conn
         .query_row(
@@ -281,6 +338,19 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
 
     if version < 4 {
         conn.execute_batch(MIGRATION_V4)
+            .map_err(AppError::BaseDeDonnees)?;
+    }
+
+    let version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if version < 5 {
+        conn.execute_batch(MIGRATION_V5)
             .map_err(AppError::BaseDeDonnees)?;
     }
 

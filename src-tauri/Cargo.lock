@@ -576,7 +576,7 @@ dependencies = [
 
 [[package]]
 name = "carreterie-gestion"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "aes-gcm",
  "anyhow",

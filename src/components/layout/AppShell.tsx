@@ -8,6 +8,7 @@ import { useUpdaterCheck } from "@/hooks/useUpdaterCheck";
 const titles: Record<string, string> = {
   "/": "Tableau de bord",
   "/factures-clients": "Factures clients",
+  "/devis": "Devis",
   "/factures-fournisseurs": "Factures fournisseurs",
   "/import-pdf": "Import PDF",
   "/contacts": "Contacts",

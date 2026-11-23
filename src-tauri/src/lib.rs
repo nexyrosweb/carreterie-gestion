@@ -85,6 +85,7 @@ pub fn run() {
             commands::invoices_issue,
             commands::invoices_create_credit_note,
             commands::invoices_generate_pdf,
+            commands::invoices_preview_pdf,
             commands::invoices_record_payment,
             commands::suppliers_list,
             commands::suppliers_get,

@@ -183,28 +183,42 @@ fn insert_lines(
 }
 
 impl InvoicesService {
-    pub fn list(db: &DbPool, status: Option<InvoiceStatus>) -> AppResult<Vec<Invoice>> {
+    pub fn list(
+        db: &DbPool,
+        status: Option<InvoiceStatus>,
+        kind: Option<InvoiceKind>,
+    ) -> AppResult<Vec<Invoice>> {
         db.with_conn(|conn| {
             let mut out = Vec::new();
+            let mut sql = String::from("SELECT id FROM invoices WHERE 1=1");
+            let mut binds: Vec<String> = Vec::new();
             if let Some(st) = status {
-                let mut stmt = conn.prepare(
-                    "SELECT id FROM invoices WHERE status = ?1 ORDER BY created_at DESC",
-                )?;
-                let ids: Vec<String> = stmt
-                    .query_map(params![st.as_db_str()], |row| row.get(0))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                for id in ids {
-                    out.push(map_invoice(conn, &id)?);
+                sql.push_str(" AND status = ?");
+                binds.push(st.as_db_str().to_string());
+            }
+            match kind {
+                Some(InvoiceKind::Devis) => {
+                    sql.push_str(" AND invoice_kind = 'devis'");
                 }
-            } else {
-                let mut stmt =
-                    conn.prepare("SELECT id FROM invoices ORDER BY created_at DESC")?;
-                let ids: Vec<String> = stmt
-                    .query_map([], |row| row.get(0))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                for id in ids {
-                    out.push(map_invoice(conn, &id)?);
+                Some(InvoiceKind::Facture) => {
+                    sql.push_str(" AND invoice_kind IN ('facture', 'avoir')");
                 }
+                Some(InvoiceKind::Avoir) => {
+                    sql.push_str(" AND invoice_kind = 'avoir'");
+                }
+                None => {}
+            }
+            sql.push_str(" ORDER BY created_at DESC");
+            let mut stmt = conn.prepare(&sql)?;
+            let params_refs: Vec<&dyn rusqlite::types::ToSql> = binds
+                .iter()
+                .map(|s| s as &dyn rusqlite::types::ToSql)
+                .collect();
+            let ids: Vec<String> = stmt
+                .query_map(params_refs.as_slice(), |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            for id in ids {
+                out.push(map_invoice(conn, &id)?);
             }
             Ok(out)
         })
@@ -217,9 +231,17 @@ impl InvoicesService {
     pub fn create_draft(db: &DbPool, user_id: &str, input: InvoiceDraftInput) -> AppResult<Invoice> {
         if input.lines.is_empty() {
             return Err(AppError::validation(
-                "Ajoutez au moins une ligne à la facture.",
+                "Ajoutez au moins une ligne au document.",
             ));
         }
+        let kind = match input.invoice_kind.clone().unwrap_or(InvoiceKind::Facture) {
+            InvoiceKind::Avoir => {
+                return Err(AppError::validation(
+                    "Utilisez la création d'avoir dédiée pour un avoir.",
+                ));
+            }
+            other => other,
+        };
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         let (total_ht, total_tva, total_ttc, computed) = compute_totals(&input.lines)?;
@@ -230,10 +252,11 @@ impl InvoicesService {
 
         db.with_conn_mut(|conn| {
             conn.execute(
-                "INSERT INTO invoices (id, number, contact_id, status, invoice_kind, related_invoice_id, issue_date, due_date, customer_notes, total_ht, total_tva, total_ttc, created_at, updated_at, issued_at) VALUES (?1,NULL,?2,'brouillon','facture',NULL,?3,?4,?5,?6,?7,?8,?9,?10,NULL)",
+                "INSERT INTO invoices (id, number, contact_id, status, invoice_kind, related_invoice_id, issue_date, due_date, customer_notes, total_ht, total_tva, total_ttc, created_at, updated_at, issued_at) VALUES (?1,NULL,?2,'brouillon',?3,NULL,?4,?5,?6,?7,?8,?9,?10,?11,NULL)",
                 params![
                     id,
                     input.contact_id,
+                    kind.as_db_str(),
                     issue_s,
                     due_s,
                     input.customer_notes,
@@ -251,7 +274,11 @@ impl InvoicesService {
         AuditService::log(
             db,
             user_id,
-            "facture_brouillon_cree",
+            if kind == InvoiceKind::Devis {
+                "devis_brouillon_cree"
+            } else {
+                "facture_brouillon_cree"
+            },
             Some("invoice"),
             Some(&id),
             None,
@@ -362,21 +389,16 @@ impl InvoicesService {
                     "Cette facture a déjà été émise ou n'est plus un brouillon.",
                 ));
             }
-            let is_credit = kind == InvoiceKind::Avoir.as_db_str();
-            let number = SettingsService::next_invoice_number(conn, is_credit)?;
+            let number = SettingsService::next_document_number(conn, &kind)?;
             let now = Utc::now().to_rfc3339();
+            let new_status = if kind == InvoiceKind::Avoir.as_db_str() {
+                InvoiceStatus::Avoir.as_db_str()
+            } else {
+                InvoiceStatus::Emise.as_db_str()
+            };
             conn.execute(
                 "UPDATE invoices SET status = ?1, number = ?2, issued_at = ?3, updated_at = ?3 WHERE id = ?4",
-                params![
-                    if is_credit {
-                        InvoiceStatus::Avoir.as_db_str()
-                    } else {
-                        InvoiceStatus::Emise.as_db_str()
-                    },
-                    number,
-                    now,
-                    id
-                ],
+                params![new_status, number, now, id],
             )?;
             Ok(())
         })?;
@@ -384,7 +406,7 @@ impl InvoicesService {
         AuditService::log(
             db,
             user_id,
-            "facture_emise",
+            "document_emis",
             Some("invoice"),
             Some(id),
             None,
@@ -477,6 +499,11 @@ impl InvoicesService {
             ));
         }
         let invoice = Self::get(db, &input.invoice_id)?;
+        if invoice.invoice_kind == InvoiceKind::Devis {
+            return Err(AppError::interdit(
+                "Un devis ne peut pas recevoir de règlement. Convertissez-le en facture.",
+            ));
+        }
         if invoice.status != InvoiceStatus::Emise {
             return Err(AppError::interdit(
                 "Seules les factures émises peuvent recevoir un règlement.",

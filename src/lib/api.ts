@@ -162,10 +162,17 @@ export const apiContactsDelete = (sessionToken: string, id: string) =>
   call<void>("contacts_delete", withSession(sessionToken, { id }));
 
 // — Client invoices —
-export const apiInvoicesList = (sessionToken: string, status?: string) =>
+export const apiInvoicesList = (
+  sessionToken: string,
+  status?: string,
+  kind?: string,
+) =>
   call<Invoice[]>(
     "invoices_list",
-    withSession(sessionToken, status ? { status } : undefined),
+    withSession(sessionToken, {
+      ...(status ? { status } : {}),
+      ...(kind ? { kind } : {}),
+    }),
   );
 
 export const apiInvoicesGet = (sessionToken: string, id: string) =>
@@ -204,6 +211,9 @@ export const apiInvoicesCreateCreditNote = (
 
 export const apiInvoicesGeneratePdf = (sessionToken: string, id: string) =>
   call<string>("invoices_generate_pdf", withSession(sessionToken, { id }));
+
+export const apiInvoicesPreviewPdf = (sessionToken: string, id: string) =>
+  call<string>("invoices_preview_pdf", withSession(sessionToken, { id }));
 
 export const apiInvoicesRecordPayment = (
   sessionToken: string,

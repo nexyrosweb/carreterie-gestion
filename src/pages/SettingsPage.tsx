@@ -79,6 +79,9 @@ export function SettingsPage() {
       smtp_cc: settings.smtp_cc,
       smtp_bcc: settings.smtp_bcc,
       smtp_timeout_secs: settings.smtp_timeout_secs,
+      devis_prefix: settings.devis_prefix,
+      bank_iban: settings.bank_iban,
+      bank_account: settings.bank_account,
     };
     setSaving(true);
     try {
@@ -311,31 +314,45 @@ export function SettingsPage() {
         </Card>
       </form>
 
-      <Card title="Numérotation et fiscalité">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input label="Préfixe factures" value={settings.invoice_prefix} onChange={(e) => setSettings({ ...settings, invoice_prefix: e.target.value })} />
-          <Input label="Année factures" value={settings.invoice_year} readOnly />
-          <Input label="Dernière séquence facture" type="number" value={String(settings.invoice_last_sequence)} readOnly />
-          <Input label="Préfixe avoirs" value={settings.credit_note_prefix} onChange={(e) => setSettings({ ...settings, credit_note_prefix: e.target.value })} />
-          <Input
-            label="TVA par défaut (%)"
-            value={String(settings.default_tax_rate)}
-            onChange={(e) => setSettings({ ...settings, default_tax_rate: e.target.value })}
-          />
-          <Input
-            label="Dossier d'export"
-            value={settings.export_folder}
-            onChange={(e) => setSettings({ ...settings, export_folder: e.target.value })}
-            className="sm:col-span-2"
-          />
-          <Textarea
-            label="Mentions légales"
-            value={settings.legal_mentions}
-            onChange={(e) => setSettings({ ...settings, legal_mentions: e.target.value })}
-            className="sm:col-span-2"
-          />
-        </div>
-      </Card>
+      <form onSubmit={(e) => void saveSettings(e)}>
+        <Card title="Numérotation, banque et fiscalité">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="Préfixe factures" value={settings.invoice_prefix} onChange={(e) => setSettings({ ...settings, invoice_prefix: e.target.value })} />
+            <Input label="Préfixe devis" value={settings.devis_prefix} onChange={(e) => setSettings({ ...settings, devis_prefix: e.target.value })} />
+            <Input label="Préfixe avoirs" value={settings.credit_note_prefix} onChange={(e) => setSettings({ ...settings, credit_note_prefix: e.target.value })} />
+            <Input label="Année" value={settings.invoice_year} readOnly />
+            <Input
+              label="IBAN (PDF factures)"
+              value={settings.bank_iban}
+              onChange={(e) => setSettings({ ...settings, bank_iban: e.target.value })}
+            />
+            <Input
+              label="Compte bancaire N°"
+              value={settings.bank_account}
+              onChange={(e) => setSettings({ ...settings, bank_account: e.target.value })}
+            />
+            <Input
+              label="TVA par défaut (%)"
+              value={String(settings.default_tax_rate)}
+              onChange={(e) => setSettings({ ...settings, default_tax_rate: e.target.value })}
+            />
+            <Input
+              label="Dossier d'export"
+              value={settings.export_folder}
+              onChange={(e) => setSettings({ ...settings, export_folder: e.target.value })}
+            />
+            <Textarea
+              label="Mentions légales"
+              value={settings.legal_mentions}
+              onChange={(e) => setSettings({ ...settings, legal_mentions: e.target.value })}
+              className="sm:col-span-2"
+            />
+          </div>
+          <Button type="submit" className="mt-4" loading={saving}>
+            Enregistrer
+          </Button>
+        </Card>
+      </form>
 
       {!isDemo ? (
         <form onSubmit={(e) => void changePassword(e)}>
