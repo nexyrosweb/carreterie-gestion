@@ -97,6 +97,8 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
+      <AboutUpdatesPanel />
+
       <form onSubmit={(e) => void saveSettings(e)}>
         <Card title="Théâtre et identité">
           <TheatreIdentityFields settings={settings} setSettings={setSettings} />
@@ -170,8 +172,6 @@ export function SettingsPage() {
           </Card>
         </form>
       ) : null}
-
-      <AboutUpdatesPanel />
 
       <footer className="border-t border-[var(--color-border)] pt-4 text-center text-xs text-[var(--color-text-muted)]">
         <p>© Nexyros · Théâtre La Carreterie</p>

@@ -7,6 +7,13 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import {
+  getCheckUpdatesOnStartup,
+  getLastUpdateCheck,
+  setCheckUpdatesOnStartup,
+  setLastUpdateCheck,
+} from "@/lib/updaterPrefs";
+import { clearPendingUpdate, readPendingUpdate } from "@/hooks/useUpdaterCheck";
 
 const NOTES_HISTORY_KEY = "carreterie_update_notes";
 
@@ -18,26 +25,42 @@ export function AboutUpdatesPanel() {
   const [version, setVersion] = useState("…");
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<Update | null>(null);
+  const [pendingHint, setPendingHint] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [installing, setInstalling] = useState(false);
-  const [lastCheck, setLastCheck] = useState<string | null>(null);
+  const [lastCheck, setLastCheck] = useState<string | null>(() => getLastUpdateCheck());
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<NotesEntry[]>([]);
   const [resetting, setResetting] = useState(false);
+  const [checkOnStartup, setCheckOnStartup] = useState(getCheckUpdatesOnStartup);
 
   useEffect(() => {
     if (!isTauri()) {
-      setVersion("1.0.0 (aperçu web)");
+      setVersion("aperçu web");
       return;
     }
-    void getVersion().then(setVersion).catch(() => setVersion("1.0.0"));
+    void getVersion().then(setVersion).catch(() => setVersion("?"));
     try {
       const raw = localStorage.getItem(NOTES_HISTORY_KEY);
       if (raw) setHistory(JSON.parse(raw) as NotesEntry[]);
     } catch {
       /* ignore */
     }
+    const pending = readPendingUpdate();
+    if (pending?.version) setPendingHint(pending.version);
   }, []);
+
+  useEffect(() => {
+    const onAvail = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ version: string }>).detail;
+      if (detail?.version) {
+        setPendingHint(detail.version);
+        showToast(`Mise à jour ${detail.version} disponible — Paramètres.`, "info");
+      }
+    };
+    window.addEventListener("carreterie:update-available", onAvail);
+    return () => window.removeEventListener("carreterie:update-available", onAvail);
+  }, [showToast]);
 
   const persistNotes = useCallback((entry: NotesEntry) => {
     setHistory((prev) => {
@@ -53,7 +76,9 @@ export function AboutUpdatesPanel() {
 
   async function searchUpdates() {
     if (!isTauri()) {
-      setError("Les mises à jour nécessitent l'application Windows installée.");
+      setError(
+        "Les mises à jour nécessitent l'application installée (pas le mode npm run tauri dev).",
+      );
       return;
     }
     setChecking(true);
@@ -64,8 +89,10 @@ export function AboutUpdatesPanel() {
       const result = await check();
       const checkedAt = new Date().toLocaleString("fr-FR");
       setLastCheck(checkedAt);
+      setLastUpdateCheck(checkedAt);
       if (result) {
         setUpdate(result);
+        setPendingHint(result.version);
         persistNotes({
           version: result.version,
           notes: result.body ?? "Notes de version non fournies.",
@@ -73,6 +100,8 @@ export function AboutUpdatesPanel() {
         });
         showToast(`Mise à jour ${result.version} disponible.`, "info");
       } else {
+        setPendingHint(null);
+        clearPendingUpdate();
         showToast("Vous êtes à jour.", "success");
       }
     } catch (e) {
@@ -81,7 +110,9 @@ export function AboutUpdatesPanel() {
           ? e.message
           : "Impossible de vérifier (réseau ou serveur indisponible).";
       setError(msg);
-      setLastCheck(new Date().toLocaleString("fr-FR"));
+      const checkedAt = new Date().toLocaleString("fr-FR");
+      setLastCheck(checkedAt);
+      setLastUpdateCheck(checkedAt);
     } finally {
       setChecking(false);
     }
@@ -115,6 +146,7 @@ export function AboutUpdatesPanel() {
             break;
         }
       });
+      clearPendingUpdate();
       showToast("Mise à jour installée. Redémarrage…", "success");
       await relaunch();
     } catch (e) {
@@ -131,36 +163,56 @@ export function AboutUpdatesPanel() {
 
   return (
     <div className="space-y-6">
-      <Card title="À propos et mises à jour">
-        <dl className="grid gap-3 text-sm">
-          <div className="flex justify-between gap-4">
-            <dt className="text-[var(--color-text-muted)]">Logiciel</dt>
-            <dd className="font-medium text-[var(--color-text)]">Carreterie Gestion</dd>
+      <Card title="Mises à jour">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1 text-sm">
+            <p>
+              <span className="text-[var(--color-text-muted)]">Version installée :</span>{" "}
+              <span className="font-semibold text-[var(--color-text)]">{version}</span>
+            </p>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Éditeur Nexyros · Dernière vérification : {lastCheck ?? "—"}
+            </p>
+            {pendingHint && !update ? (
+              <p className="text-xs font-medium text-[var(--color-or)]">
+                Version {pendingHint} signalée — cliquez sur Rechercher pour confirmer.
+              </p>
+            ) : null}
           </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-[var(--color-text-muted)]">Version installée</dt>
-            <dd className="font-medium text-[var(--color-text)]">{version}</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-[var(--color-text-muted)]">Éditeur</dt>
-            <dd className="font-medium text-[var(--color-or)]">Nexyros</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-[var(--color-text-muted)]">Dernière vérification</dt>
-            <dd className="text-[var(--color-text)]">{lastCheck ?? "—"}</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-[var(--color-text-muted)]">Mode actif</dt>
-            <dd className="font-medium text-[var(--color-text)]">
-              {isDemo ? "Démonstration" : "Production"}
-            </dd>
-          </div>
-        </dl>
+          <Button
+            className="shrink-0"
+            loading={checking}
+            onClick={() => void searchUpdates()}
+            disabled={checking || installing}
+          >
+            Rechercher des mises à jour
+          </Button>
+        </div>
+
+        <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text)]">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[var(--color-rouge)]"
+            checked={checkOnStartup}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setCheckOnStartup(on);
+              setCheckUpdatesOnStartup(on);
+              showToast(
+                on
+                  ? "Vérification au démarrage activée."
+                  : "Vérification au démarrage désactivée.",
+                "info",
+              );
+            }}
+          />
+          Vérifier automatiquement les mises à jour au démarrage
+        </label>
 
         {update ? (
-          <div className="mt-4 rounded-md border border-[var(--color-or)]/40 bg-[var(--color-surface-elevated)] px-3 py-3 text-sm">
-            <p className="font-semibold text-[var(--color-text)]">
-              Nouvelle version : {update.version}
+          <div className="mt-4 rounded-md border border-[var(--color-or)]/50 bg-[var(--color-surface-elevated)] px-4 py-4">
+            <p className="text-base font-semibold text-[var(--color-text)]">
+              Nouvelle version disponible : {update.version}
             </p>
             <p className="mt-2 whitespace-pre-wrap text-xs text-[var(--color-text-muted)]">
               {update.body || "Notes de version non fournies."}
@@ -173,16 +225,19 @@ export function AboutUpdatesPanel() {
                     style={{ width: `${progress}%` }}
                   />
                 </div>
-                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{progress} %</p>
+                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                  Téléchargement {progress} %
+                </p>
               </div>
             ) : null}
             <Button
-              className="mt-3"
+              className="mt-4"
+              variant="gold"
               loading={installing}
               onClick={() => void installUpdate()}
               disabled={installing}
             >
-              Télécharger et installer
+              Mettre à jour maintenant
             </Button>
           </div>
         ) : null}
@@ -193,24 +248,39 @@ export function AboutUpdatesPanel() {
           </p>
         ) : null}
 
-        <Button
-          className="mt-4"
-          variant="secondary"
-          loading={checking}
-          onClick={() => void searchUpdates()}
-        >
-          Rechercher des mises à jour
-        </Button>
-        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-          Les mises à jour sont signées. Hors ligne, la facturation reste utilisable.
+        <p className="mt-3 text-[11px] text-[var(--color-text-muted)]">
+          Les mises à jour sont signées. Hors ligne, la facturation reste utilisable. Fonctionne
+          avec l&apos;application installée via le setup NSIS.
         </p>
+      </Card>
+
+      <Card title="À propos">
+        <dl className="grid gap-2 text-sm">
+          <div className="flex justify-between gap-4">
+            <dt className="text-[var(--color-text-muted)]">Logiciel</dt>
+            <dd className="font-medium text-[var(--color-text)]">Carreterie Gestion</dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-[var(--color-text-muted)]">Éditeur</dt>
+            <dd className="font-medium text-[var(--color-or)]">Nexyros</dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-[var(--color-text-muted)]">Mode actif</dt>
+            <dd className="font-medium text-[var(--color-text)]">
+              {isDemo ? "Démonstration" : "Production"}
+            </dd>
+          </div>
+        </dl>
       </Card>
 
       {history.length > 0 ? (
         <Card title="Historique des nouveautés">
           <ul className="space-y-3 text-sm">
             {history.map((h) => (
-              <li key={`${h.version}-${h.checkedAt}`} className="border-b border-[var(--color-border)] pb-2 last:border-0">
+              <li
+                key={`${h.version}-${h.checkedAt}`}
+                className="border-b border-[var(--color-border)] pb-2 last:border-0"
+              >
                 <p className="font-medium text-[var(--color-text)]">v{h.version}</p>
                 <p className="text-[11px] text-[var(--color-text-muted)]">{h.checkedAt}</p>
                 <p className="mt-1 whitespace-pre-wrap text-xs text-[var(--color-text-muted)]">
@@ -238,7 +308,10 @@ export function AboutUpdatesPanel() {
               void resetDemo()
                 .then(() => showToast("Démonstration réinitialisée.", "success"))
                 .catch((e) =>
-                  showToast(e instanceof Error ? e.message : "Échec de la réinitialisation.", "error"),
+                  showToast(
+                    e instanceof Error ? e.message : "Échec de la réinitialisation.",
+                    "error",
+                  ),
                 )
                 .finally(() => setResetting(false));
             }}
