@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { UpdateAvailableModal } from "@/components/updater/UpdateAvailableModal";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { useUpdaterCheck } from "@/hooks/useUpdaterCheck";
@@ -39,6 +40,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      <UpdateAvailableModal />
     </div>
   );
 }

@@ -1,46 +1,8 @@
-import { useEffect } from "react";
-import { check } from "@tauri-apps/plugin-updater";
-import { isTauri } from "@tauri-apps/api/core";
-import { getCheckUpdatesOnStartup, setLastUpdateCheck } from "@/lib/updaterPrefs";
-
 const PENDING_UPDATE_KEY = "carreterie_pending_update";
 
-/** Vérifie les mises à jour au démarrage sans bloquer l'UI (si activé dans Paramètres). */
+/** Conservé pour AppShell : la popup UpdateAvailableModal gère le check au démarrage. */
 export function useUpdaterCheck() {
-  useEffect(() => {
-    if (!isTauri()) return;
-    if (!getCheckUpdatesOnStartup()) return;
-
-    const t = window.setTimeout(() => {
-      void check()
-        .then((update) => {
-          setLastUpdateCheck(new Date().toLocaleString("fr-FR"));
-          if (update) {
-            try {
-              localStorage.setItem(
-                PENDING_UPDATE_KEY,
-                JSON.stringify({
-                  version: update.version,
-                  notes: update.body ?? "",
-                }),
-              );
-            } catch {
-              /* ignore */
-            }
-            window.dispatchEvent(
-              new CustomEvent("carreterie:update-available", {
-                detail: { version: update.version },
-              }),
-            );
-          }
-        })
-        .catch(() => {
-          /* hors ligne ou endpoint indisponible — silencieux */
-        });
-    }, 2500);
-
-    return () => window.clearTimeout(t);
-  }, []);
+  // no-op : UpdateAvailableModal est montée dans AppShell
 }
 
 export function readPendingUpdate(): { version: string; notes: string } | null {
@@ -59,4 +21,9 @@ export function clearPendingUpdate() {
   } catch {
     /* ignore */
   }
+}
+
+/** Depuis Paramètres : ouvre la popup si une MAJ GitHub existe. */
+export function requestUpdateCheckWithPopup() {
+  window.dispatchEvent(new Event("carreterie:force-update-check"));
 }

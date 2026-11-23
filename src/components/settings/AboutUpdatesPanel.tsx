@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
 import { isTauri } from "@tauri-apps/api/core";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
@@ -11,9 +9,11 @@ import {
   getCheckUpdatesOnStartup,
   getLastUpdateCheck,
   setCheckUpdatesOnStartup,
-  setLastUpdateCheck,
 } from "@/lib/updaterPrefs";
-import { clearPendingUpdate, readPendingUpdate } from "@/hooks/useUpdaterCheck";
+import {
+  readPendingUpdate,
+  requestUpdateCheckWithPopup,
+} from "@/hooks/useUpdaterCheck";
 
 const NOTES_HISTORY_KEY = "carreterie_update_notes";
 
@@ -24,12 +24,8 @@ export function AboutUpdatesPanel() {
   const { showToast } = useToast();
   const [version, setVersion] = useState("…");
   const [checking, setChecking] = useState(false);
-  const [update, setUpdate] = useState<Update | null>(null);
   const [pendingHint, setPendingHint] = useState<string | null>(null);
-  const [progress, setProgress] = useState<number | null>(null);
-  const [installing, setInstalling] = useState(false);
   const [lastCheck, setLastCheck] = useState<string | null>(() => getLastUpdateCheck());
-  const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<NotesEntry[]>([]);
   const [resetting, setResetting] = useState(false);
   const [checkOnStartup, setCheckOnStartup] = useState(getCheckUpdatesOnStartup);
@@ -55,110 +51,27 @@ export function AboutUpdatesPanel() {
       const detail = (ev as CustomEvent<{ version: string }>).detail;
       if (detail?.version) {
         setPendingHint(detail.version);
-        showToast(`Mise à jour ${detail.version} disponible — Paramètres.`, "info");
+        setLastCheck(getLastUpdateCheck());
       }
     };
     window.addEventListener("carreterie:update-available", onAvail);
     return () => window.removeEventListener("carreterie:update-available", onAvail);
-  }, [showToast]);
-
-  const persistNotes = useCallback((entry: NotesEntry) => {
-    setHistory((prev) => {
-      const next = [entry, ...prev.filter((e) => e.version !== entry.version)].slice(0, 10);
-      try {
-        localStorage.setItem(NOTES_HISTORY_KEY, JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
   }, []);
 
-  async function searchUpdates() {
+  function searchUpdates() {
     if (!isTauri()) {
-      setError(
-        "Les mises à jour nécessitent l'application installée (pas le mode npm run tauri dev).",
+      showToast(
+        "Les mises à jour nécessitent l'application installée (setup NSIS).",
+        "warning",
       );
       return;
     }
     setChecking(true);
-    setError(null);
-    setUpdate(null);
-    setProgress(null);
-    try {
-      const result = await check();
-      const checkedAt = new Date().toLocaleString("fr-FR");
-      setLastCheck(checkedAt);
-      setLastUpdateCheck(checkedAt);
-      if (result) {
-        setUpdate(result);
-        setPendingHint(result.version);
-        persistNotes({
-          version: result.version,
-          notes: result.body ?? "Notes de version non fournies.",
-          checkedAt,
-        });
-        showToast(`Mise à jour ${result.version} disponible.`, "info");
-      } else {
-        setPendingHint(null);
-        clearPendingUpdate();
-        showToast("Vous êtes à jour.", "success");
-      }
-    } catch (e) {
-      const msg =
-        e instanceof Error
-          ? e.message
-          : "Impossible de vérifier (réseau ou serveur indisponible).";
-      setError(msg);
-      const checkedAt = new Date().toLocaleString("fr-FR");
-      setLastCheck(checkedAt);
-      setLastUpdateCheck(checkedAt);
-    } finally {
+    requestUpdateCheckWithPopup();
+    window.setTimeout(() => {
       setChecking(false);
-    }
-  }
-
-  async function installUpdate() {
-    if (!update) return;
-    const ok = window.confirm(
-      `Installer la version ${update.version} ?\n\nL'application redémarrera. Vos données AppData sont conservées.`,
-    );
-    if (!ok) return;
-    setInstalling(true);
-    setError(null);
-    setProgress(0);
-    try {
-      let downloaded = 0;
-      let contentLength = 0;
-      await update.downloadAndInstall((event) => {
-        switch (event.event) {
-          case "Started":
-            contentLength = event.data.contentLength ?? 0;
-            break;
-          case "Progress":
-            downloaded += event.data.chunkLength;
-            if (contentLength > 0) {
-              setProgress(Math.min(100, Math.round((downloaded / contentLength) * 100)));
-            }
-            break;
-          case "Finished":
-            setProgress(100);
-            break;
-        }
-      });
-      clearPendingUpdate();
-      showToast("Mise à jour installée. Redémarrage…", "success");
-      await relaunch();
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Échec du téléchargement ou de la vérification de signature.",
-      );
-      setProgress(null);
-    } finally {
-      setInstalling(false);
-    }
+      setLastCheck(getLastUpdateCheck());
+    }, 4000);
   }
 
   return (
@@ -173,17 +86,18 @@ export function AboutUpdatesPanel() {
             <p className="text-xs text-[var(--color-text-muted)]">
               Éditeur Nexyros · Dernière vérification : {lastCheck ?? "—"}
             </p>
-            {pendingHint && !update ? (
+            {pendingHint ? (
               <p className="text-xs font-medium text-[var(--color-or)]">
-                Version {pendingHint} signalée — cliquez sur Rechercher pour confirmer.
+                Version {pendingHint} disponible — une fenêtre d&apos;installation s&apos;affiche
+                automatiquement.
               </p>
             ) : null}
           </div>
           <Button
             className="shrink-0"
             loading={checking}
-            onClick={() => void searchUpdates()}
-            disabled={checking || installing}
+            onClick={searchUpdates}
+            disabled={checking}
           >
             Rechercher des mises à jour
           </Button>
@@ -200,57 +114,17 @@ export function AboutUpdatesPanel() {
               setCheckUpdatesOnStartup(on);
               showToast(
                 on
-                  ? "Vérification au démarrage activée."
+                  ? "Popup de mise à jour au démarrage activée."
                   : "Vérification au démarrage désactivée.",
                 "info",
               );
             }}
           />
-          Vérifier automatiquement les mises à jour au démarrage
+          Afficher une popup au démarrage si une nouvelle version GitHub est disponible
         </label>
 
-        {update ? (
-          <div className="mt-4 rounded-md border border-[var(--color-or)]/50 bg-[var(--color-surface-elevated)] px-4 py-4">
-            <p className="text-base font-semibold text-[var(--color-text)]">
-              Nouvelle version disponible : {update.version}
-            </p>
-            <p className="mt-2 whitespace-pre-wrap text-xs text-[var(--color-text-muted)]">
-              {update.body || "Notes de version non fournies."}
-            </p>
-            {progress != null ? (
-              <div className="mt-3">
-                <div className="h-2 overflow-hidden rounded bg-[var(--color-border)]">
-                  <div
-                    className="h-full bg-[var(--color-success)] transition-all"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                  Téléchargement {progress} %
-                </p>
-              </div>
-            ) : null}
-            <Button
-              className="mt-4"
-              variant="gold"
-              loading={installing}
-              onClick={() => void installUpdate()}
-              disabled={installing}
-            >
-              Mettre à jour maintenant
-            </Button>
-          </div>
-        ) : null}
-
-        {error ? (
-          <p className="mt-3 text-xs text-[var(--color-danger)]" role="alert">
-            {error}
-          </p>
-        ) : null}
-
         <p className="mt-3 text-[11px] text-[var(--color-text-muted)]">
-          Les mises à jour sont signées. Hors ligne, la facturation reste utilisable. Fonctionne
-          avec l&apos;application installée via le setup NSIS.
+          Les mises à jour sont signées. Hors ligne, la facturation reste utilisable.
         </p>
       </Card>
 
