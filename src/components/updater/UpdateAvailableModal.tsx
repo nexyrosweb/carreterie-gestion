@@ -66,18 +66,19 @@ export function UpdateAvailableModal() {
 
   const runCheck = useCallback(
     async (opts?: { forcePopup?: boolean }) => {
-      if (!isTauri()) return null;
+      if (!isTauri()) return { update: null as Update | null, error: "hors_tauri" as string | null };
       try {
         const u = await check();
         setLastUpdateCheck(new Date().toLocaleString("fr-FR"));
         if (u) {
           presentUpdate(u, opts?.forcePopup === true);
-          return u;
+          return { update: u, error: null };
         }
         clearPendingUpdate();
-        return null;
-      } catch {
-        return null;
+        return { update: null, error: null };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { update: null, error: msg };
       }
     },
     [presentUpdate],
@@ -98,8 +99,15 @@ export function UpdateAvailableModal() {
 
   useEffect(() => {
     const onForce = () => {
-      void runCheck({ forcePopup: true }).then((u) => {
-        if (!u) showToast("Vous êtes à jour.", "success");
+      void runCheck({ forcePopup: true }).then((r) => {
+        if (r.error) {
+          showToast(
+            "Impossible de vérifier les mises à jour (réseau, dépôt inaccessible ou latest.json). Vérifiez que les releases GitHub sont publiques.",
+            "error",
+          );
+          return;
+        }
+        if (!r.update) showToast("Vous êtes à jour.", "success");
       });
     };
     const onSilent = () => {

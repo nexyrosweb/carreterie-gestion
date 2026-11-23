@@ -39,6 +39,8 @@ Erreur CI `Missing comment in secret key` / `incorrect updater private key passw
 
 TLS et vérification de signature restent actifs en production.
 
+**Important :** le fichier `latest.json` et les `.exe` de release doivent être **téléchargeables sans authentification**. Un dépôt GitHub privé renvoie 404 à l’updater → message « réseau ou serveur indisponible ». Le dépôt de distribution (ou au minimum les releases) doit être public.
+
 ## Processus de release
 
 1. Bump SemVer dans `package.json` et `src-tauri/tauri.conf.json` / `Cargo.toml`
