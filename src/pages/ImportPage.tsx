@@ -189,7 +189,7 @@ export function ImportPage() {
       setProgress(100);
       const warnCount = results.reduce((n, r) => n + r.warnings.length, 0);
       showToast(
-        `${results.length} document(s) analysé(s)${warnCount ? ` · ${warnCount} avertissement(s)` : ""}.`,
+        `${results.length} document(s) analysé(s)${warnCount ? ` – ${warnCount} avertissement(s)` : ""}.`,
         "success",
       );
       await load();
@@ -276,7 +276,7 @@ export function ImportPage() {
               ← Retour à la liste
             </Button>
             <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-              {selected.original_filename} · extraction : {selected.extraction_source}
+              {selected.original_filename} – extraction : {selected.extraction_source}
             </p>
           </div>
           <div className="flex gap-2">
@@ -301,7 +301,7 @@ export function ImportPage() {
               <p>Champs manquants : {selected.missing_fields.join(", ")}</p>
             ) : null}
             {coherent === false ? (
-              <p className="text-[var(--color-danger)]">Incohérence HT + TVA ≠ TTC — corrigez avant validation.</p>
+              <p className="text-[var(--color-danger)]">Incohérence HT + TVA ≠ TTC – corrigez avant validation.</p>
             ) : null}
             {coherent === true ? <p className="text-[var(--color-success)]">Montants HT / TVA / TTC cohérents.</p> : null}
           </div>
@@ -386,7 +386,7 @@ export function ImportPage() {
                       { value: "", label: "— Aucune —" },
                       ...matches.map((m) => ({
                         value: m.id,
-                        label: `${m.name}${m.siret ? ` (${m.siret})` : ""} · ${m.match_reason}`,
+                        label: `${m.name}${m.siret ? ` (${m.siret})` : ""} – ${m.match_reason}`,
                       })),
                     ]}
                   />
@@ -457,7 +457,7 @@ export function ImportPage() {
             Importer des PDF…
           </Button>
           <p className="text-xs text-[var(--color-text-muted)]">
-            Hors ligne · max 25 Mo · doublons détectés par empreinte SHA-256. OCR local via Tesseract si installé.
+            Hors ligne – max 25 Mo – doublons détectés par empreinte SHA-256. OCR local via Tesseract si installé.
           </p>
         </div>
         {importing ? (

@@ -71,7 +71,7 @@ export function Sidebar() {
 }
 
 function DbStatusFooter() {
-  const { sessionToken, isDemo } = useAuth();
+  const { sessionToken, isDemo, username } = useAuth();
   const [connected, setConnected] = useState<boolean | null>(null);
   const [version, setVersion] = useState("…");
   const [pendingVersion, setPendingVersion] = useState<string | null>(null);
@@ -127,6 +127,13 @@ function DbStatusFooter() {
 
   return (
     <div className="border-t border-[var(--color-border)] px-3 py-3">
+      {username ? (
+        <p className="mb-2 truncate px-0.5 text-xs font-medium text-[var(--color-text)]">
+          {username}
+          {isDemo ? " (démo)" : ""}
+        </p>
+      ) : null}
+
       <button
         type="button"
         onClick={() => requestUpdateCheckWithPopup()}
@@ -138,7 +145,7 @@ function DbStatusFooter() {
         )}
         title={
           pendingVersion
-            ? `Mise à jour ${pendingVersion} disponible — cliquer pour installer`
+            ? `Mise à jour ${pendingVersion} disponible – cliquer pour installer`
             : "Rechercher des mises à jour"
         }
       >
@@ -160,7 +167,7 @@ function DbStatusFooter() {
       </button>
 
       <p
-        className="flex items-center gap-2 px-0.5 text-[10px] text-[var(--color-text-muted)]"
+        className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-0.5 text-[10px] text-[var(--color-text-muted)]"
         role="status"
         aria-live="polite"
       >
@@ -175,10 +182,12 @@ function DbStatusFooter() {
         />
         <span>{label}</span>
         {connected === true ? (
-          <span className="text-[var(--color-text-muted)]">
-            · {isDemo ? "demo.db" : "Base locale"}
+          <span>
+            – {isDemo ? "demo.db" : "Base locale"} – v{version}
           </span>
-        ) : null}
+        ) : (
+          <span>– v{version}</span>
+        )}
       </p>
     </div>
   );

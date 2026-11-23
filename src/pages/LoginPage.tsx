@@ -151,7 +151,7 @@ export function LoginPage() {
                 error={errors.password}
                 hint={
                   needsSetup
-                    ? `${password.length}/${ADMIN_PASSWORD_LENGTH}+ caractères · modifiable`
+                    ? `${password.length}/${ADMIN_PASSWORD_LENGTH}+ caractères – modifiable`
                     : undefined
                 }
                 required
@@ -219,7 +219,7 @@ export function LoginPage() {
                 Essayer la démonstration
               </Button>
               <p className="mt-2 text-center text-[11px] text-[var(--color-text-muted)]">
-                Base isolée · données fictives · sans valeur comptable
+                Base isolée – données fictives – sans valeur comptable
               </p>
             </div>
           ) : null}
@@ -232,7 +232,7 @@ export function LoginPage() {
             disque équivalent) pour protéger les sauvegardes en cas de vol ou de perte du matériel.
           </p>
           <p>{disclaimer}</p>
-          <p className="pt-2">© Nexyros · Théâtre La Carreterie</p>
+          <p className="pt-2">© Nexyros – Théâtre La Carreterie</p>
         </aside>
       </div>
     </div>

@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { Textarea } from "@/components/ui/Textarea";
 import { TheatreLogo } from "@/components/brand/TheatreLogo";
-import { AboutUpdatesPanel } from "@/components/settings/AboutUpdatesPanel";
 
 export function SettingsPage() {
   const { sessionToken, isDemo } = useAuth();
@@ -97,8 +96,6 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <AboutUpdatesPanel />
-
       <form onSubmit={(e) => void saveSettings(e)}>
         <Card title="Théâtre et identité">
           <TheatreIdentityFields settings={settings} setSettings={setSettings} />
@@ -151,7 +148,7 @@ export function SettingsPage() {
                 value={pwd.next}
                 onChange={(e) => setPwd({ ...pwd, next: e.target.value })}
                 autoComplete="new-password"
-                hint="12 caractères minimum · modifiable"
+                hint="12 caractères minimum – modifiable"
               />
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="ghost" size="sm" onClick={regenerateNewPassword}>
@@ -174,7 +171,7 @@ export function SettingsPage() {
       ) : null}
 
       <footer className="border-t border-[var(--color-border)] pt-4 text-center text-xs text-[var(--color-text-muted)]">
-        <p>© Nexyros · Théâtre La Carreterie</p>
+        <p>© Nexyros – Théâtre La Carreterie</p>
         <p className="mt-1 text-[var(--color-or)]">Développé par Nexyros</p>
       </footer>
     </div>
@@ -200,7 +197,7 @@ function TheatreIdentityFields({
         <p className="mb-2 text-sm font-medium text-[var(--color-text)]">Logo</p>
         <TheatreLogo className="max-w-[280px]" />
         <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-          Logo officiel Théâtre La Carreterie — utilisé automatiquement sur les PDF.
+          Logo officiel Théâtre La Carreterie – utilisé automatiquement sur les PDF.
         </p>
       </div>
     </div>

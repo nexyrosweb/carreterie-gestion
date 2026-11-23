@@ -84,11 +84,11 @@ export function AboutUpdatesPanel() {
               <span className="font-semibold text-[var(--color-text)]">{version}</span>
             </p>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Éditeur Nexyros · Dernière vérification : {lastCheck ?? "—"}
+              Éditeur Nexyros – Dernière vérification : {lastCheck ?? "—"}
             </p>
             {pendingHint ? (
               <p className="text-xs font-medium text-[var(--color-or)]">
-                Version {pendingHint} disponible — une fenêtre d&apos;installation s&apos;affiche
+                Version {pendingHint} disponible – une fenêtre d&apos;installation s&apos;affiche
                 automatiquement.
               </p>
             ) : null}
@@ -126,25 +126,6 @@ export function AboutUpdatesPanel() {
         <p className="mt-3 text-[11px] text-[var(--color-text-muted)]">
           Les mises à jour sont signées. Hors ligne, la facturation reste utilisable.
         </p>
-      </Card>
-
-      <Card title="À propos">
-        <dl className="grid gap-2 text-sm">
-          <div className="flex justify-between gap-4">
-            <dt className="text-[var(--color-text-muted)]">Logiciel</dt>
-            <dd className="font-medium text-[var(--color-text)]">Carreterie Gestion</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-[var(--color-text-muted)]">Éditeur</dt>
-            <dd className="font-medium text-[var(--color-or)]">Nexyros</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-[var(--color-text-muted)]">Mode actif</dt>
-            <dd className="font-medium text-[var(--color-text)]">
-              {isDemo ? "Démonstration" : "Production"}
-            </dd>
-          </div>
-        </dl>
       </Card>
 
       {history.length > 0 ? (

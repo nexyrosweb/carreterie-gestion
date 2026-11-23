@@ -32,7 +32,7 @@ export function AppShell() {
             className="flex items-center justify-center gap-2 bg-[var(--color-or)] px-4 py-1.5 text-center text-xs font-semibold tracking-wide text-[var(--color-page)]"
             role="status"
           >
-            MODE DÉMONSTRATION — données fictives, sans valeur comptable
+            MODE DÉMONSTRATION – données fictives, sans valeur comptable
           </div>
         ) : null}
         <TopBar title={title} />

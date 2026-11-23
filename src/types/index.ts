@@ -1,4 +1,4 @@
-/** Types partagés — alignés sur les modèles serde Rust (snake_case) */
+/** Types partagés – alignés sur les modèles serde Rust (snake_case) */
 
 export type DecimalValue = string | number;
 

@@ -188,7 +188,7 @@ export function ContactsPage() {
                   <Td>
                     <div className="text-xs text-[var(--color-text-muted)]">
                       {c.email || "—"}
-                      {c.phone ? ` · ${c.phone}` : ""}
+                      {c.phone ? ` – ${c.phone}` : ""}
                     </div>
                   </Td>
                   <Td>{c.city || "—"}</Td>

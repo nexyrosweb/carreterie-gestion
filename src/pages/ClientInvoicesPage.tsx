@@ -473,7 +473,7 @@ export function ClientInvoicesPage() {
             Ajouter une ligne
           </Button>
           <p className="text-right text-sm text-[var(--color-text-muted)]">
-            Total HT {formatEur(totals.totalHt)} · TVA {formatEur(totals.totalTva)} · TTC{" "}
+            Total HT {formatEur(totals.totalHt)} – TVA {formatEur(totals.totalTva)} – TTC{" "}
             <span className="font-semibold text-[var(--color-or)]">{formatEur(totals.totalTtc)}</span>
           </p>
         </div>
@@ -524,12 +524,12 @@ export function ClientInvoicesPage() {
               </Badge>
             </p>
             <p>
-              Totaux : HT {formatMoneyDecimal(detail.total_ht)} · TVA{" "}
-              {formatMoneyDecimal(detail.total_tva)} · TTC {formatMoneyDecimal(detail.total_ttc)}
+              Totaux : HT {formatMoneyDecimal(detail.total_ht)} – TVA{" "}
+              {formatMoneyDecimal(detail.total_tva)} – TTC {formatMoneyDecimal(detail.total_ttc)}
             </p>
             {detail.status === "emise" ? (
               <p className="text-xs text-[var(--color-text-muted)]">
-                Payé : {formatMoneyDecimal(detail.amount_paid ?? 0)} · Statut paiement :{" "}
+                Payé : {formatMoneyDecimal(detail.amount_paid ?? 0)} – Statut paiement :{" "}
                 {detail.payment_status ?? "impayee"}
               </p>
             ) : null}

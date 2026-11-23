@@ -84,7 +84,7 @@ function LockFormCardHeader({
       </div>
       <p className="mt-3 text-xs text-[var(--color-text-muted)]">
         Inactivité détectée{username ? ` (${username})` : ""}
-        {isDemo ? " — mode démonstration" : ""}.{" "}
+        {isDemo ? " – mode démonstration" : ""}.{" "}
         {isDemo
           ? "Cliquez sur Déverrouiller pour reprendre la démo."
           : "Saisissez votre mot de passe pour reprendre."}

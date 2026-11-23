@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { isTauri } from "@tauri-apps/api/core";
 import { apiAppDisclaimer, ApiError } from "@/lib/api";
+import { AboutUpdatesPanel } from "@/components/settings/AboutUpdatesPanel";
 import { TheatreLogo } from "@/components/brand/TheatreLogo";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
@@ -40,7 +41,7 @@ export function AboutPage() {
         <div>
           <h2 className="text-xl font-bold text-[var(--color-text)]">Carreterie Gestion</h2>
           <p className="text-sm text-[var(--color-text-muted)]">
-            Gestion locale pour le Théâtre La Carreterie · mises à jour automatiques
+            Gestion locale pour le Théâtre La Carreterie – mises à jour automatiques
           </p>
         </div>
       </header>
@@ -51,9 +52,11 @@ export function AboutPage() {
           <span className="font-semibold text-[var(--color-or)]">Nexyros</span>.
         </p>
         <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-          Version {version} · Développé par Nexyros
+          Version {version} – Développé par Nexyros
         </p>
       </Card>
+
+      <AboutUpdatesPanel />
 
       <Card title="Mentions importantes">
         <ul className="list-disc space-y-2 pl-5 text-sm text-[var(--color-text-muted)]">
