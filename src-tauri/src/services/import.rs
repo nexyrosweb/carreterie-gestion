@@ -153,21 +153,47 @@ impl ImportService {
 
         let existing_batch = Self::list_by_base_hash(db, &file_hash)?;
         if !existing_batch.is_empty() {
-            let mut out = Vec::new();
-            for existing in existing_batch {
-                let mut warnings =
-                    vec!["Document déjà importé (empreinte SHA-256 identique).".to_string()];
-                if existing.status != ImportStatus::Doublon {
-                    warnings.push("Statut précédent : enregistrement existant retourné.".to_string());
-                }
-                let matches = Self::match_contacts_for_doc(db, &existing)?;
-                out.push(ImportAnalyzeResult {
-                    document: existing,
-                    matches,
-                    warnings,
+            let has_segments = existing_batch.iter().any(|d| d.file_hash.contains('#'));
+            let has_validated = existing_batch
+                .iter()
+                .any(|d| d.status == ImportStatus::Valide);
+            // Ancien import mono-fiche (avant découpage) : on ré-analyse si rien n'est encore validé.
+            let legacy_single = !has_segments
+                && !has_validated
+                && existing_batch.iter().all(|d| {
+                    matches!(
+                        d.status,
+                        ImportStatus::EnAttente | ImportStatus::Doublon | ImportStatus::Rejete
+                    )
                 });
+            if legacy_single {
+                db.with_conn_mut(|conn| {
+                    for d in &existing_batch {
+                        conn.execute(
+                            "DELETE FROM imported_documents WHERE id = ?1",
+                            params![d.id],
+                        )?;
+                    }
+                    Ok(())
+                })?;
+            } else {
+                let mut out = Vec::new();
+                for existing in existing_batch {
+                    let mut warnings =
+                        vec!["Document déjà importé (empreinte SHA-256 identique).".to_string()];
+                    if existing.status != ImportStatus::Doublon {
+                        warnings
+                            .push("Statut précédent : enregistrement existant retourné.".to_string());
+                    }
+                    let matches = Self::match_contacts_for_doc(db, &existing)?;
+                    out.push(ImportAnalyzeResult {
+                        document: existing,
+                        matches,
+                        warnings,
+                    });
+                }
+                return Ok(out);
             }
-            return Ok(out);
         }
 
         let stored_name = format!("{file_hash}.pdf");
@@ -755,6 +781,23 @@ fn create_linked_client_draft(
         .or_else(|| input.invoice_number.clone())
         .unwrap_or_else(|| "Import PDF".to_string());
 
+    let notes = if input.document_type == ImportDocumentType::Avoir {
+        Some(format!(
+            "Import avoir (à convertir){}{}",
+            input
+                .invoice_number
+                .as_deref()
+                .map(|n| format!(" N°{n}"))
+                .unwrap_or_default(),
+            input
+                .notes
+                .as_deref()
+                .map(|n| format!(" — {n}"))
+                .unwrap_or_default()
+        ))
+    } else {
+        input.notes.clone()
+    };
     let draft = InvoiceDraftInput {
         contact_id: contact_id.to_string(),
         issue_date,
@@ -762,15 +805,15 @@ fn create_linked_client_draft(
             .payment_date
             .as_deref()
             .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()),
-        customer_notes: input.notes.clone(),
+        customer_notes: notes,
         lines: vec![InvoiceLineInput {
             description: desc,
             quantity: dec!(1),
-            unit_price_ht: ht,
+            unit_price_ht: ht.abs(),
             tax_rate_percent: tax,
             ..Default::default()
         }],
-        invoice_kind: None,
+        invoice_kind: Some(crate::models::invoice::InvoiceKind::Facture),
         ..Default::default()
     };
     let inv = InvoicesService::create_draft(db, user_id, draft)?;

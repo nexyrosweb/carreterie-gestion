@@ -52,6 +52,35 @@ function parseInvokeError(err: unknown): ApiError {
     }
     return new ApiError(err);
   }
+  if (err && typeof err === "object") {
+    const o = err as Record<string, unknown>;
+    if (typeof o.message === "string" && o.message.trim()) {
+      return new ApiError(
+        o.message,
+        typeof o.code === "string" ? o.code : undefined,
+        typeof o.disclaimer === "string" ? o.disclaimer : undefined,
+      );
+    }
+    const nested = o.error;
+    if (nested && typeof nested === "object") {
+      const n = nested as Record<string, unknown>;
+      if (typeof n.message === "string" && n.message.trim()) {
+        return new ApiError(
+          n.message,
+          typeof n.code === "string" ? n.code : undefined,
+          typeof n.disclaimer === "string" ? n.disclaimer : undefined,
+        );
+      }
+    }
+    try {
+      const asJson = JSON.stringify(err);
+      if (asJson && asJson !== "{}") {
+        return new ApiError(asJson);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   if (err instanceof Error) {
     return new ApiError(err.message);
   }

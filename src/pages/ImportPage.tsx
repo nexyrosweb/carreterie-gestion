@@ -83,6 +83,30 @@ function checkAmounts(ht?: string | null, tva?: string | null, ttc?: string | nu
   return Math.abs(a + b - c) <= 0.02;
 }
 
+function segmentIndex(doc: ImportedDocument): number {
+  const m = /#(\d+)$/.exec(doc.file_hash);
+  return m ? Number(m[1]) : 1;
+}
+
+function typeLabel(t: string): string {
+  switch (t) {
+    case "acompte":
+      return "Acompte";
+    case "avoir":
+      return "Avoir";
+    case "facture":
+      return "Facture";
+    default:
+      return "Inconnu";
+  }
+}
+
+function samePdfBatch(a: ImportedDocument, b: ImportedDocument): boolean {
+  if (a.stored_path && b.stored_path && a.stored_path === b.stored_path) return true;
+  const base = (h: string) => h.replace(/#\d+$/, "");
+  return base(a.file_hash) === base(b.file_hash);
+}
+
 export function ImportPage() {
   const { sessionToken } = useAuth();
   const { showToast } = useToast();
@@ -104,6 +128,7 @@ export function ImportPage() {
   const [newContactName, setNewContactName] = useState("");
   const [createLinked, setCreateLinked] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reviewBatchIds, setReviewBatchIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
@@ -135,7 +160,7 @@ export function ImportPage() {
 
   useEffect(() => {
     return () => {
-      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl.split("#")[0] ?? pdfUrl);
     };
   }, [pdfUrl]);
 
@@ -143,6 +168,38 @@ export function ImportPage() {
     () => docs.find((d) => d.id === selectedId) ?? null,
     [docs, selectedId],
   );
+
+  const batchDocs = useMemo(() => {
+    if (!selected) return [] as ImportedDocument[];
+    const fromIds = reviewBatchIds
+      .map((id) => docs.find((d) => d.id === id))
+      .filter((d): d is ImportedDocument => d != null);
+    const fromPath = docs.filter((d) => samePdfBatch(d, selected));
+    const merged = new Map<string, ImportedDocument>();
+    for (const d of [...fromIds, ...fromPath]) merged.set(d.id, d);
+    if (!merged.has(selected.id)) merged.set(selected.id, selected);
+    return [...merged.values()].sort((a, b) => segmentIndex(a) - segmentIndex(b));
+  }, [docs, selected, reviewBatchIds]);
+
+  async function loadPdfPreview(doc: ImportedDocument) {
+    if (!sessionToken) return;
+    try {
+      const b64 = await apiImportPdfData(sessionToken, doc.id);
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const page = segmentIndex(doc);
+      const url = `${URL.createObjectURL(blob)}#page=${page}`;
+      setPdfUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev.split("#")[0] ?? prev);
+        return url;
+      });
+    } catch (err) {
+      setPdfUrl(null);
+      showToast(err instanceof ApiError ? err.message : "Aperçu PDF impossible.", "error");
+    }
+  }
 
   async function openReview(doc: ImportedDocument, extraMatches?: ContactMatchCandidate[], extraWarnings?: string[]) {
     if (!sessionToken) return;
@@ -152,6 +209,11 @@ export function ImportPage() {
     setCreateLinked(false);
     setNewContactName(doc.party_name ?? "");
     setWarnings(extraWarnings ?? []);
+    setReviewBatchIds((prev) => {
+      const siblings = docs.filter((d) => samePdfBatch(d, doc)).map((d) => d.id);
+      const set = new Set([...prev, ...siblings, doc.id]);
+      return [...set];
+    });
     if (extraMatches) {
       setMatches(extraMatches);
     } else {
@@ -167,18 +229,7 @@ export function ImportPage() {
         setMatches([]);
       }
     }
-    try {
-      const b64 = await apiImportPdfData(sessionToken, doc.id);
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: "application/pdf" });
-      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-      setPdfUrl(URL.createObjectURL(blob));
-    } catch (err) {
-      setPdfUrl(null);
-      showToast(err instanceof ApiError ? err.message : "Aperçu PDF impossible.", "error");
-    }
+    await loadPdfPreview(doc);
   }
 
   async function pickAndAnalyze() {
@@ -211,10 +262,16 @@ export function ImportPage() {
         `${results.length} document(s) analysé(s)${warnCount ? ` – ${warnCount} avertissement(s)` : ""}.`,
         "success",
       );
-      await load();
-      const firstPending = results.find((r) => r.document.status === "en_attente");
+      const list = await apiImportList(sessionToken, {});
+      setDocs(list);
+      const batchIds = results.map((r) => r.document.id);
+      setReviewBatchIds(batchIds);
+      const firstPending =
+        results.find((r) => r.document.status === "en_attente") ?? results[0];
       if (firstPending) {
-        await openReview(firstPending.document, firstPending.matches, firstPending.warnings);
+        const refreshed =
+          list.find((d) => d.id === firstPending.document.id) ?? firstPending.document;
+        await openReview(refreshed, firstPending.matches, firstPending.warnings);
       }
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Import impossible.", "error");
@@ -255,15 +312,40 @@ export function ImportPage() {
       };
       const updated = await apiImportValidate(sessionToken, input);
       showToast("Document validé et archivé (sans numérotation officielle).", "success");
-      setSelectedId(null);
-      setForm(null);
-      setPdfUrl(null);
-      await load();
       if (updated.linked_draft_invoice_id) {
         showToast("Brouillon client créé (non émis).", "info");
       }
+      const list = await apiImportList(sessionToken, {
+        status: filterStatus || undefined,
+        direction: filterDirection || undefined,
+        documentType: filterType || undefined,
+      });
+      setDocs(list);
+      const next = batchDocs.find(
+        (d) =>
+          d.id !== updated.id &&
+          (d.status === "en_attente" || d.status === "doublon") &&
+          samePdfBatch(d, updated),
+      );
+      const nextFresh = next ? list.find((d) => d.id === next.id) : undefined;
+      if (nextFresh) {
+        await openReview(nextFresh);
+      } else {
+        setSelectedId(null);
+        setForm(null);
+        setPdfUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev.split("#")[0] ?? prev);
+          return null;
+        });
+      }
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Validation impossible.", "error");
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Validation impossible.";
+      showToast(msg, "error");
     } finally {
       setSaving(false);
     }
@@ -291,11 +373,25 @@ export function ImportPage() {
       <div className="flex h-[calc(100vh-7rem)] flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <Button variant="ghost" size="sm" onClick={() => { setForm(null); setSelectedId(null); setPdfUrl(null); }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setForm(null);
+                setSelectedId(null);
+                setPdfUrl((prev) => {
+                  if (prev) URL.revokeObjectURL(prev.split("#")[0] ?? prev);
+                  return null;
+                });
+              }}
+            >
               ← Retour à la liste
             </Button>
             <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-              {selected.original_filename} – extraction : {selected.extraction_source}
+              {batchDocs.length > 1
+                ? `${batchDocs.length} documents dans ce PDF — page ${segmentIndex(selected)} / ${batchDocs.length}`
+                : selected.original_filename}{" "}
+              – extraction : {selected.extraction_source}
             </p>
           </div>
           <div className="flex gap-2">
@@ -326,10 +422,80 @@ export function ImportPage() {
           </div>
         )}
 
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+        <div
+          className={`grid min-h-0 flex-1 gap-3 ${
+            batchDocs.length > 1
+              ? "lg:grid-cols-[14rem_minmax(0,1fr)_minmax(0,1fr)]"
+              : "lg:grid-cols-2"
+          }`}
+        >
+          {batchDocs.length > 1 ? (
+            <Card className="flex min-h-0 flex-col !p-2 overflow-hidden">
+              <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-or)]">
+                Pages / documents
+              </p>
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                {batchDocs.map((doc) => {
+                  const active = doc.id === selected.id;
+                  const badge = statusBadge(doc.status);
+                  return (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      onClick={() => void openReview(doc)}
+                      className={`w-full rounded-md border px-2 py-2 text-left transition ${
+                        active
+                          ? "border-[var(--color-or)] bg-[var(--color-surface-elevated)]"
+                          : "border-[var(--color-border)] hover:border-[var(--color-or)]/50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-semibold text-[var(--color-or)]">
+                          Page {segmentIndex(doc)}
+                        </span>
+                        <Badge tone={badge.tone}>{badge.label}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs font-medium text-[var(--color-text)]">
+                        {typeLabel(doc.document_type)}
+                        {doc.invoice_number ? ` N°${doc.invoice_number}` : ""}
+                      </p>
+                      <p className="truncate text-[11px] text-[var(--color-text-muted)]">
+                        {doc.party_name ?? "Client non détecté"}
+                      </p>
+                      <p className="text-[11px] text-[var(--color-text-muted)]">
+                        TTC {doc.total_ttc ?? "—"}
+                      </p>
+                      {active ? (
+                        <select
+                          className="mt-2 w-full rounded border border-[var(--color-border)] bg-transparent px-1 py-1 text-[11px]"
+                          value={form.document_type}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            const v = e.target.value as ImportDocumentType;
+                            updateField("document_type", v);
+                            setDocs((prev) =>
+                              prev.map((d) =>
+                                d.id === doc.id ? { ...d, document_type: v } : d,
+                              ),
+                            );
+                          }}
+                        >
+                          <option value="facture">Facture</option>
+                          <option value="acompte">Acompte</option>
+                          <option value="avoir">Avoir</option>
+                          <option value="inconnu">Inconnu</option>
+                        </select>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+          ) : null}
+
           <Card className="flex min-h-[420px] flex-col !p-0 overflow-hidden">
             <div className="border-b border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-text-muted)]">
-              Aperçu PDF original
+              Aperçu PDF — page {segmentIndex(selected)}
             </div>
             {pdfUrl ? (
               <iframe title="Aperçu PDF" src={pdfUrl} className="h-full min-h-[400px] w-full flex-1 bg-[var(--color-surface)]" />
@@ -355,7 +521,15 @@ export function ImportPage() {
                 <Select
                   label="Type de document"
                   value={form.document_type}
-                  onChange={(e) => updateField("document_type", e.target.value as ImportDocumentType)}
+                  onChange={(e) => {
+                    const v = e.target.value as ImportDocumentType;
+                    updateField("document_type", v);
+                    setDocs((prev) =>
+                      prev.map((d) =>
+                        d.id === selected.id ? { ...d, document_type: v } : d,
+                      ),
+                    );
+                  }}
                   options={[
                     { value: "facture", label: "Facture" },
                     { value: "acompte", label: "Acompte" },
