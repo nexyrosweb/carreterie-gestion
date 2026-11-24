@@ -64,6 +64,57 @@ impl InvoiceKind {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InvoiceLineKind {
+    #[default]
+    Standard,
+    LocationSalle,
+}
+
+impl InvoiceLineKind {
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            InvoiceLineKind::Standard => "standard",
+            InvoiceLineKind::LocationSalle => "location_salle",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "location_salle" => InvoiceLineKind::LocationSalle,
+            _ => InvoiceLineKind::Standard,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentType {
+    #[default]
+    Reglement,
+    Acompte,
+    Solde,
+}
+
+impl PaymentType {
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            PaymentType::Reglement => "reglement",
+            PaymentType::Acompte => "acompte",
+            PaymentType::Solde => "solde",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "acompte" => PaymentType::Acompte,
+            "solde" => PaymentType::Solde,
+            _ => PaymentType::Reglement,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvoiceLine {
     pub id: String,
@@ -76,6 +127,8 @@ pub struct InvoiceLine {
     pub line_ht: Decimal,
     pub line_tva: Decimal,
     pub line_ttc: Decimal,
+    #[serde(default)]
+    pub line_kind: InvoiceLineKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +150,26 @@ pub struct Invoice {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub issued_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub accepted_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub rental_start: Option<String>,
+    #[serde(default)]
+    pub rental_end: Option<String>,
     pub lines: Vec<InvoiceLine>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvoicePayment {
+    pub id: String,
+    pub invoice_id: String,
+    pub amount: Decimal,
+    pub paid_at: NaiveDate,
+    pub method: Option<String>,
+    pub reference: Option<String>,
+    pub notes: Option<String>,
+    pub payment_type: PaymentType,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -108,6 +180,22 @@ pub struct RecordPaymentInput {
     pub method: Option<String>,
     pub reference: Option<String>,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub payment_type: Option<PaymentType>,
+}
+
+impl Default for RecordPaymentInput {
+    fn default() -> Self {
+        Self {
+            invoice_id: String::new(),
+            amount: Decimal::ZERO,
+            paid_at: chrono::Utc::now().date_naive(),
+            method: None,
+            reference: None,
+            notes: None,
+            payment_type: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -116,6 +204,20 @@ pub struct InvoiceLineInput {
     pub quantity: Decimal,
     pub unit_price_ht: Decimal,
     pub tax_rate_percent: Decimal,
+    #[serde(default)]
+    pub line_kind: Option<InvoiceLineKind>,
+}
+
+impl Default for InvoiceLineInput {
+    fn default() -> Self {
+        Self {
+            description: String::new(),
+            quantity: Decimal::ZERO,
+            unit_price_ht: Decimal::ZERO,
+            tax_rate_percent: Decimal::ZERO,
+            line_kind: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -125,9 +227,14 @@ pub struct InvoiceDraftInput {
     pub due_date: Option<NaiveDate>,
     pub customer_notes: Option<String>,
     pub lines: Vec<InvoiceLineInput>,
-    /// `facture` (défaut) ou `devis`.
     #[serde(default)]
     pub invoice_kind: Option<InvoiceKind>,
+    #[serde(default)]
+    pub related_invoice_id: Option<String>,
+    #[serde(default)]
+    pub rental_start: Option<String>,
+    #[serde(default)]
+    pub rental_end: Option<String>,
 }
 
 impl Default for InvoiceDraftInput {
@@ -139,6 +246,24 @@ impl Default for InvoiceDraftInput {
             customer_notes: None,
             lines: Vec::new(),
             invoice_kind: None,
+            related_invoice_id: None,
+            rental_start: None,
+            rental_end: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConvertDevisInput {
+    pub devis_id: String,
+    #[serde(default)]
+    pub issue_immediately: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SendDocumentEmailInput {
+    pub invoice_id: String,
+    pub to_email: Option<String>,
+    pub subject: Option<String>,
+    pub body: Option<String>,
 }

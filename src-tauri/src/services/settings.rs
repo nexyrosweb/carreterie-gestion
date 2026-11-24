@@ -75,6 +75,9 @@ impl SettingsService {
                 devis_prefix: Self::get_key_or(conn, "devis_prefix", "DV-"),
                 bank_iban: Self::get_key_or(conn, "bank_iban", ""),
                 bank_account: Self::get_key_or(conn, "bank_account", ""),
+                pdf_primary_color: Self::get_key_or(conn, "pdf_primary_color", "#8B1E1E"),
+                pdf_header_subtitle: Self::get_key_or(conn, "pdf_header_subtitle", ""),
+                pdf_use_custom_logo: Self::get_key_or(conn, "pdf_use_custom_logo", "0") == "1",
             })
         })
     }
@@ -155,6 +158,15 @@ impl SettingsService {
             }
             if let Some(v) = patch.bank_account {
                 Self::set_key(conn, "bank_account", &v)?;
+            }
+            if let Some(v) = patch.pdf_primary_color {
+                Self::set_key(conn, "pdf_primary_color", &v)?;
+            }
+            if let Some(v) = patch.pdf_header_subtitle {
+                Self::set_key(conn, "pdf_header_subtitle", &v)?;
+            }
+            if let Some(v) = patch.pdf_use_custom_logo {
+                Self::set_key(conn, "pdf_use_custom_logo", if v { "1" } else { "0" })?;
             }
             Ok(())
         })?;

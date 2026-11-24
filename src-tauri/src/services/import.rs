@@ -674,8 +674,10 @@ fn create_linked_client_draft(
             quantity: dec!(1),
             unit_price_ht: ht,
             tax_rate_percent: tax,
+            ..Default::default()
         }],
         invoice_kind: None,
+        ..Default::default()
     };
     let inv = InvoicesService::create_draft(db, user_id, draft)?;
     Ok(inv.id)

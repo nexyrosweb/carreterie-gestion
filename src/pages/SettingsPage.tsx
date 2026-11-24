@@ -8,7 +8,9 @@ import {
   apiAuthProfileGet,
   apiAuthProfileSetAvatar,
   apiAuthProfileUpdate,
+  apiMailTestConnection,
   apiSettingsGet,
+  apiSettingsSetLogo,
   apiSettingsUpdate,
   ApiError,
 } from "@/lib/api";
@@ -82,6 +84,9 @@ export function SettingsPage() {
       devis_prefix: settings.devis_prefix,
       bank_iban: settings.bank_iban,
       bank_account: settings.bank_account,
+      pdf_primary_color: settings.pdf_primary_color,
+      pdf_header_subtitle: settings.pdf_header_subtitle,
+      pdf_use_custom_logo: settings.pdf_use_custom_logo,
     };
     setSaving(true);
     try {
@@ -127,6 +132,32 @@ export function SettingsPage() {
       showToast("Logo de profil mis à jour.", "success");
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Logo non mis à jour.", "error");
+    }
+  }
+
+  async function pickPdfLogo() {
+    if (!sessionToken) return;
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      title: "Choisir un logo PDF",
+    });
+    if (!selected || Array.isArray(selected)) return;
+    try {
+      setSettings(await apiSettingsSetLogo(sessionToken, selected));
+      showToast("Logo PDF mis à jour.", "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Logo PDF non mis à jour.", "error");
+    }
+  }
+
+  async function testSmtp() {
+    if (!sessionToken) return;
+    try {
+      const msg = await apiMailTestConnection(sessionToken);
+      showToast(msg, "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Test SMTP échoué.", "error");
     }
   }
 
@@ -308,8 +339,61 @@ export function SettingsPage() {
               className="sm:col-span-2"
             />
           </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button type="submit" loading={saving}>
+              Enregistrer le SMTP
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void testSmtp()}
+            >
+              Tester la connexion
+            </Button>
+          </div>
+        </Card>
+      </form>
+
+      <form onSubmit={(e) => void saveSettings(e)}>
+        <Card title="Thème PDF">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              label="Couleur principale (hex)"
+              value={settings.pdf_primary_color}
+              onChange={(e) =>
+                setSettings({ ...settings, pdf_primary_color: e.target.value })
+              }
+              placeholder="#8B1E1E"
+            />
+            <Input
+              label="Sous-titre en-tête"
+              value={settings.pdf_header_subtitle}
+              onChange={(e) =>
+                setSettings({ ...settings, pdf_header_subtitle: e.target.value })
+              }
+              placeholder="ex. Scène nationale"
+            />
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={settings.pdf_use_custom_logo}
+                onChange={(e) =>
+                  setSettings({ ...settings, pdf_use_custom_logo: e.target.checked })
+                }
+              />
+              Utiliser le logo personnalisé (sinon logo théâtre embarqué)
+            </label>
+            <div className="sm:col-span-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => void pickPdfLogo()}>
+                Choisir un logo PDF
+              </Button>
+              {settings.logo_path && !settings.logo_path.startsWith("brand:") ? (
+                <p className="mt-2 text-xs text-[var(--color-text-muted)]">{settings.logo_path}</p>
+              ) : null}
+            </div>
+          </div>
           <Button type="submit" className="mt-4" loading={saving}>
-            Enregistrer le SMTP
+            Enregistrer le thème PDF
           </Button>
         </Card>
       </form>

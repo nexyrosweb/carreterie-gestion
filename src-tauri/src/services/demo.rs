@@ -235,15 +235,16 @@ impl DemoService {
                         quantity: dec!(1),
                         unit_price_ht: dec!(800.00),
                         tax_rate_percent: dec!(20),
+                        line_kind: Some(crate::models::invoice::InvoiceLineKind::LocationSalle),
                     },
                     InvoiceLineInput {
                         description: "Régie lumière forfait".into(),
                         quantity: dec!(1),
                         unit_price_ht: dec!(350.00),
-                        tax_rate_percent: dec!(20),
-                    },
+                        tax_rate_percent: dec!(20), ..Default::default() },
                 ],
                 invoice_kind: None,
+                ..Default::default()
             },
         )?;
         let issued = InvoicesService::issue(db, &user.id, &draft.id)?;
@@ -259,6 +260,7 @@ impl DemoService {
                 method: Some("virement".into()),
                 reference: Some("ACOMPTE-DEMO-001".into()),
                 notes: Some("Acompte fictif".into()),
+                payment_type: Some(crate::models::invoice::PaymentType::Acompte),
             },
         )?;
 
@@ -274,9 +276,9 @@ impl DemoService {
                     description: "Atelier pédagogique (démo)".into(),
                     quantity: dec!(2),
                     unit_price_ht: dec!(120.00),
-                    tax_rate_percent: dec!(5.5),
-                }],
+                    tax_rate_percent: dec!(5.5), ..Default::default() }],
                 invoice_kind: None,
+                ..Default::default()
             },
         )?;
         let issued2 = InvoicesService::issue(db, &user.id, &draft2.id)?;
@@ -290,8 +292,7 @@ impl DemoService {
                 description: "Avoir partiel — annulation atelier (démo)".into(),
                 quantity: dec!(1),
                 unit_price_ht: dec!(120.00),
-                tax_rate_percent: dec!(5.5),
-            }],
+                tax_rate_percent: dec!(5.5), ..Default::default() }],
             Some("Avoir fictif sans valeur comptable".into()),
         )?;
 
@@ -308,9 +309,9 @@ impl DemoService {
                     description: "Option technique".into(),
                     quantity: dec!(1),
                     unit_price_ht: dec!(90.00),
-                    tax_rate_percent: dec!(20),
-                }],
+                    tax_rate_percent: dec!(20), ..Default::default() }],
                 invoice_kind: None,
+                ..Default::default()
             },
         )?;
 

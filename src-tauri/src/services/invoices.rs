@@ -7,7 +7,8 @@ use uuid::Uuid;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::invoice::{
-    Invoice, InvoiceDraftInput, InvoiceKind, InvoiceLine, InvoiceLineInput, InvoiceStatus,
+    ConvertDevisInput, Invoice, InvoiceDraftInput, InvoiceKind, InvoiceLine, InvoiceLineInput,
+    InvoiceLineKind, InvoicePayment, InvoiceStatus, PaymentType,
 };
 use crate::money::{format_amount, line_amounts, round_eur};
 use crate::services::audit::AuditService;
@@ -24,6 +25,7 @@ fn decimal_from_row(s: &str) -> Decimal {
 }
 
 fn map_line(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceLine> {
+    let kind_s: String = row.get::<_, Option<String>>(10)?.unwrap_or_else(|| "standard".into());
     Ok(InvoiceLine {
         id: row.get(0)?,
         invoice_id: row.get(1)?,
@@ -35,12 +37,13 @@ fn map_line(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceLine> {
         line_ht: decimal_from_row(&row.get::<_, String>(7)?),
         line_tva: decimal_from_row(&row.get::<_, String>(8)?),
         line_ttc: decimal_from_row(&row.get::<_, String>(9)?),
+        line_kind: InvoiceLineKind::from_db_str(&kind_s),
     })
 }
 
 fn load_lines(conn: &Connection, invoice_id: &str) -> AppResult<Vec<InvoiceLine>> {
     let mut stmt = conn.prepare(
-        "SELECT id, invoice_id, position, description, quantity, unit_price_ht, tax_rate_percent, line_ht, line_tva, line_ttc FROM invoice_lines WHERE invoice_id = ?1 ORDER BY position",
+        "SELECT id, invoice_id, position, description, quantity, unit_price_ht, tax_rate_percent, line_ht, line_tva, line_ttc, COALESCE(line_kind, 'standard') FROM invoice_lines WHERE invoice_id = ?1 ORDER BY position",
     )?;
     let rows = stmt.query_map(params![invoice_id], map_line)?;
     let mut lines = Vec::new();
@@ -52,7 +55,7 @@ fn load_lines(conn: &Connection, invoice_id: &str) -> AppResult<Vec<InvoiceLine>
 
 fn map_invoice(conn: &Connection, invoice_id: &str) -> AppResult<Invoice> {
     let inv = conn.query_row(
-        "SELECT id, number, contact_id, status, invoice_kind, related_invoice_id, issue_date, due_date, customer_notes, total_ht, total_tva, total_ttc, COALESCE(amount_paid, '0.00'), COALESCE(payment_status, 'impayee'), created_at, updated_at, issued_at FROM invoices WHERE id = ?1",
+        "SELECT id, number, contact_id, status, invoice_kind, related_invoice_id, issue_date, due_date, customer_notes, total_ht, total_tva, total_ttc, COALESCE(amount_paid, '0.00'), COALESCE(payment_status, 'impayee'), created_at, updated_at, issued_at, accepted_at, rental_start, rental_end FROM invoices WHERE id = ?1",
         params![invoice_id],
         |row| {
             let status_s: String = row.get(3)?;
@@ -62,6 +65,7 @@ fn map_invoice(conn: &Connection, invoice_id: &str) -> AppResult<Invoice> {
             let created_at: String = row.get(14)?;
             let updated_at: String = row.get(15)?;
             let issued_at: Option<String> = row.get(16)?;
+            let accepted_at: Option<String> = row.get(17)?;
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -80,6 +84,9 @@ fn map_invoice(conn: &Connection, invoice_id: &str) -> AppResult<Invoice> {
                 created_at,
                 updated_at,
                 issued_at,
+                accepted_at,
+                row.get::<_, Option<String>>(18)?,
+                row.get::<_, Option<String>>(19)?,
             ))
         },
     ).map_err(|_| AppError::Introuvable)?;
@@ -104,6 +111,9 @@ fn map_invoice(conn: &Connection, invoice_id: &str) -> AppResult<Invoice> {
         created_at,
         updated_at,
         issued_at,
+        accepted_at,
+        rental_start,
+        rental_end,
     ) = inv;
 
     Ok(Invoice {
@@ -132,6 +142,13 @@ fn map_invoice(conn: &Connection, invoice_id: &str) -> AppResult<Invoice> {
                 .ok()
                 .map(|d| d.with_timezone(&Utc))
         }),
+        accepted_at: accepted_at.and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        }),
+        rental_start,
+        rental_end,
         lines,
     })
 }
@@ -163,8 +180,13 @@ fn insert_lines(
 ) -> AppResult<()> {
     for (pos, (line, ht, tva, ttc)) in computed.iter().enumerate() {
         let line_id = Uuid::new_v4().to_string();
+        let kind = line
+            .line_kind
+            .clone()
+            .unwrap_or(InvoiceLineKind::Standard)
+            .as_db_str();
         conn.execute(
-            "INSERT INTO invoice_lines (id, invoice_id, position, description, quantity, unit_price_ht, tax_rate_percent, line_ht, line_tva, line_ttc) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            "INSERT INTO invoice_lines (id, invoice_id, position, description, quantity, unit_price_ht, tax_rate_percent, line_ht, line_tva, line_ttc, line_kind) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             params![
                 line_id,
                 invoice_id,
@@ -176,6 +198,7 @@ fn insert_lines(
                 format_amount(*ht),
                 format_amount(*tva),
                 format_amount(*ttc),
+                kind,
             ],
         )?;
     }
@@ -252,11 +275,12 @@ impl InvoicesService {
 
         db.with_conn_mut(|conn| {
             conn.execute(
-                "INSERT INTO invoices (id, number, contact_id, status, invoice_kind, related_invoice_id, issue_date, due_date, customer_notes, total_ht, total_tva, total_ttc, created_at, updated_at, issued_at) VALUES (?1,NULL,?2,'brouillon',?3,NULL,?4,?5,?6,?7,?8,?9,?10,?11,NULL)",
+                "INSERT INTO invoices (id, number, contact_id, status, invoice_kind, related_invoice_id, issue_date, due_date, customer_notes, total_ht, total_tva, total_ttc, created_at, updated_at, issued_at, rental_start, rental_end) VALUES (?1,NULL,?2,'brouillon',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,NULL,?13,?14)",
                 params![
                     id,
                     input.contact_id,
                     kind.as_db_str(),
+                    input.related_invoice_id,
                     issue_s,
                     due_s,
                     input.customer_notes,
@@ -264,7 +288,9 @@ impl InvoicesService {
                     format_amount(total_tva),
                     format_amount(total_ttc),
                     now,
-                    now
+                    now,
+                    input.rental_start,
+                    input.rental_end,
                 ],
             )?;
             insert_lines(conn, &id, &computed)?;
@@ -316,7 +342,7 @@ impl InvoicesService {
                 ));
             }
             conn.execute(
-                "UPDATE invoices SET contact_id=?1, issue_date=?2, due_date=?3, customer_notes=?4, total_ht=?5, total_tva=?6, total_ttc=?7, updated_at=?8 WHERE id=?9",
+                "UPDATE invoices SET contact_id=?1, issue_date=?2, due_date=?3, customer_notes=?4, total_ht=?5, total_tva=?6, total_ttc=?7, updated_at=?8, rental_start=?9, rental_end=?10 WHERE id=?11",
                 params![
                     input.contact_id,
                     issue_s,
@@ -326,6 +352,8 @@ impl InvoicesService {
                     format_amount(total_tva),
                     format_amount(total_ttc),
                     now,
+                    input.rental_start,
+                    input.rental_end,
                     id
                 ],
             )?;
@@ -526,9 +554,14 @@ impl InvoicesService {
         let now = Utc::now().to_rfc3339();
         let paid_at = input.paid_at.format("%Y-%m-%d").to_string();
 
+        let payment_type = input
+            .payment_type
+            .clone()
+            .unwrap_or(PaymentType::Reglement);
+
         db.with_conn_mut(|conn| {
             conn.execute(
-                "INSERT INTO invoice_payments (id, invoice_id, amount, paid_at, method, reference, notes, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                "INSERT INTO invoice_payments (id, invoice_id, amount, paid_at, method, reference, notes, created_at, payment_type) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
                 params![
                     payment_id,
                     input.invoice_id,
@@ -537,7 +570,8 @@ impl InvoicesService {
                     input.method,
                     input.reference,
                     input.notes,
-                    now
+                    now,
+                    payment_type.as_db_str(),
                 ],
             )?;
             conn.execute(
@@ -555,12 +589,142 @@ impl InvoicesService {
         AuditService::log(
             db,
             user_id,
-            "reglement_enregistre",
+            match payment_type {
+                PaymentType::Acompte => "acompte_enregistre",
+                PaymentType::Solde => "solde_enregistre",
+                PaymentType::Reglement => "reglement_enregistre",
+            },
             Some("invoice"),
             Some(&input.invoice_id),
             Some(&format_amount(input.amount)),
         )?;
         Self::get(db, &input.invoice_id)
+    }
+
+    pub fn list_payments(db: &DbPool, invoice_id: &str) -> AppResult<Vec<InvoicePayment>> {
+        db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, invoice_id, amount, paid_at, method, reference, notes, COALESCE(payment_type, 'reglement'), created_at FROM invoice_payments WHERE invoice_id = ?1 ORDER BY paid_at, created_at",
+            )?;
+            let rows = stmt.query_map(params![invoice_id], |row| {
+                let paid_at: String = row.get(3)?;
+                Ok(InvoicePayment {
+                    id: row.get(0)?,
+                    invoice_id: row.get(1)?,
+                    amount: decimal_from_row(&row.get::<_, String>(2)?),
+                    paid_at: parse_date_opt(&paid_at).unwrap_or_else(|| Utc::now().date_naive()),
+                    method: row.get(4)?,
+                    reference: row.get(5)?,
+                    notes: row.get(6)?,
+                    payment_type: PaymentType::from_db_str(&row.get::<_, String>(7)?),
+                    created_at: row.get(8)?,
+                })
+            })?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn create_from_devis(
+        db: &DbPool,
+        user_id: &str,
+        input: ConvertDevisInput,
+    ) -> AppResult<Invoice> {
+        let devis = Self::get(db, &input.devis_id)?;
+        if devis.invoice_kind != InvoiceKind::Devis {
+            return Err(AppError::validation("Le document source n'est pas un devis."));
+        }
+        if devis.status != InvoiceStatus::Emise {
+            return Err(AppError::interdit(
+                "Seuls les devis émis peuvent être convertis en facture.",
+            ));
+        }
+        let already: i64 = db.with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM invoices WHERE related_invoice_id = ?1 AND invoice_kind = 'facture'",
+                params![input.devis_id],
+                |r| r.get(0),
+            )
+            .map_err(AppError::from)
+        })?;
+        if already > 0 {
+            return Err(AppError::interdit(
+                "Une facture a déjà été créée à partir de ce devis.",
+            ));
+        }
+
+        let lines: Vec<InvoiceLineInput> = devis
+            .lines
+            .iter()
+            .map(|l| InvoiceLineInput {
+                description: l.description.clone(),
+                quantity: l.quantity,
+                unit_price_ht: l.unit_price_ht,
+                tax_rate_percent: l.tax_rate_percent,
+                line_kind: Some(l.line_kind.clone()),
+            })
+            .collect();
+
+        let draft = Self::create_draft(
+            db,
+            user_id,
+            InvoiceDraftInput {
+                contact_id: devis.contact_id,
+                issue_date: devis.issue_date.or_else(|| Some(Utc::now().date_naive())),
+                due_date: devis.due_date,
+                customer_notes: devis.customer_notes,
+                lines,
+                invoice_kind: Some(InvoiceKind::Facture),
+                related_invoice_id: Some(input.devis_id.clone()),
+                rental_start: devis.rental_start,
+                rental_end: devis.rental_end,
+            },
+        )?;
+
+        AuditService::log(
+            db,
+            user_id,
+            "devis_converti_facture",
+            Some("invoice"),
+            Some(&draft.id),
+            Some(&input.devis_id),
+        )?;
+
+        if input.issue_immediately {
+            Self::issue(db, user_id, &draft.id)
+        } else {
+            Ok(draft)
+        }
+    }
+
+    pub fn accept_devis(db: &DbPool, user_id: &str, devis_id: &str) -> AppResult<Invoice> {
+        let devis = Self::get(db, devis_id)?;
+        if devis.invoice_kind != InvoiceKind::Devis {
+            return Err(AppError::validation("Le document n'est pas un devis."));
+        }
+        if devis.status != InvoiceStatus::Emise {
+            return Err(AppError::interdit("Seuls les devis émis peuvent être acceptés."));
+        }
+        let now = Utc::now().to_rfc3339();
+        db.with_conn_mut(|conn| {
+            conn.execute(
+                "UPDATE invoices SET accepted_at = ?1, updated_at = ?1 WHERE id = ?2",
+                params![now, devis_id],
+            )?;
+            Ok(())
+        })?;
+        AuditService::log(
+            db,
+            user_id,
+            "devis_accepte",
+            Some("invoice"),
+            Some(devis_id),
+            None,
+        )?;
+        Self::get(db, devis_id)
     }
 }
 
@@ -640,7 +804,9 @@ mod tests {
                     quantity: dec!(1),
                     unit_price_ht: dec!(100),
                     tax_rate_percent: dec!(20),
+                    ..Default::default()
                 }],
+                ..Default::default()
             },
         )
         .unwrap();
@@ -659,7 +825,9 @@ mod tests {
                     quantity: dec!(1),
                     unit_price_ht: dec!(50),
                     tax_rate_percent: dec!(20),
+                    ..Default::default()
                 }],
+                ..Default::default()
             },
         )
         .unwrap_err();
@@ -702,7 +870,9 @@ mod tests {
                     quantity: dec!(1),
                     unit_price_ht: dec!(10),
                     tax_rate_percent: dec!(20),
+                    ..Default::default()
                 }],
+                ..Default::default()
             },
         )
         .unwrap();
@@ -715,6 +885,7 @@ mod tests {
                 quantity: dec!(1),
                 unit_price_ht: dec!(10),
                 tax_rate_percent: dec!(20),
+                ..Default::default()
             }],
             None,
         )

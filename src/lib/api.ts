@@ -16,11 +16,14 @@ import type {
   ImportAnalyzeResult,
   ImportedDocument,
   ImportValidateInput,
+  ConvertDevisInput,
   Invoice,
   InvoiceDraftInput,
   InvoiceLineInput,
+  InvoicePayment,
   LoginResponse,
   RecordPaymentInput,
+  SendDocumentEmailInput,
   SupplierInvoice,
   SupplierInvoiceInput,
 } from "@/types";
@@ -219,6 +222,49 @@ export const apiInvoicesRecordPayment = (
   sessionToken: string,
   input: RecordPaymentInput,
 ) => call<Invoice>("invoices_record_payment", withSession(sessionToken, { input }));
+
+export const apiInvoicesListPayments = (sessionToken: string, invoiceId: string) =>
+  call<InvoicePayment[]>(
+    "invoices_list_payments",
+    withSession(sessionToken, { invoiceId }),
+  );
+
+export const apiInvoicesCreateFromDevis = (
+  sessionToken: string,
+  input: ConvertDevisInput,
+) => call<Invoice>("invoices_create_from_devis", withSession(sessionToken, { input }));
+
+export const apiInvoicesAcceptDevis = (sessionToken: string, devisId: string) =>
+  call<Invoice>("invoices_accept_devis", withSession(sessionToken, { devisId }));
+
+export const apiMailSendDocument = (
+  sessionToken: string,
+  input: SendDocumentEmailInput,
+) => call<void>("mail_send_document", withSession(sessionToken, { input }));
+
+export const apiMailTestConnection = (sessionToken: string) =>
+  call<string>("mail_test_connection", withSession(sessionToken));
+
+export const apiAccountingExportFecLite = (
+  sessionToken: string,
+  opts?: { dateFrom?: string; dateTo?: string },
+) =>
+  call<string>(
+    "accounting_export_fec_lite",
+    withSession(sessionToken, {
+      dateFrom: opts?.dateFrom,
+      dateTo: opts?.dateTo,
+    }),
+  );
+
+export const apiContractsGenerateFromDevis = (sessionToken: string, devisId: string) =>
+  call<string>("contracts_generate_from_devis", withSession(sessionToken, { devisId }));
+
+export const apiContractsPreviewFromDevis = (sessionToken: string, devisId: string) =>
+  call<string>("contracts_preview_from_devis", withSession(sessionToken, { devisId }));
+
+export const apiSettingsSetLogo = (sessionToken: string, sourcePath: string) =>
+  call<AppSettings>("settings_set_logo", withSession(sessionToken, { sourcePath }));
 
 // — Supplier invoices (suppliers_*) —
 export const apiSuppliersList = (sessionToken: string) =>

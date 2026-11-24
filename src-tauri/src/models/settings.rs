@@ -31,6 +31,9 @@ pub struct AppSettings {
     pub devis_prefix: String,
     pub bank_iban: String,
     pub bank_account: String,
+    pub pdf_primary_color: String,
+    pub pdf_header_subtitle: String,
+    pub pdf_use_custom_logo: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -60,4 +63,7 @@ pub struct AppSettingsPatch {
     pub devis_prefix: Option<String>,
     pub bank_iban: Option<String>,
     pub bank_account: Option<String>,
+    pub pdf_primary_color: Option<String>,
+    pub pdf_header_subtitle: Option<String>,
+    pub pdf_use_custom_logo: Option<bool>,
 }

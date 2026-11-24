@@ -277,6 +277,23 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (5);
 PRAGMA foreign_keys=ON;
 "#;
 
+const MIGRATION_V6: &str = r#"
+ALTER TABLE invoices ADD COLUMN accepted_at TEXT;
+ALTER TABLE invoices ADD COLUMN rental_start TEXT;
+ALTER TABLE invoices ADD COLUMN rental_end TEXT;
+
+ALTER TABLE invoice_lines ADD COLUMN line_kind TEXT NOT NULL DEFAULT 'standard';
+ALTER TABLE invoice_payments ADD COLUMN payment_type TEXT NOT NULL DEFAULT 'reglement';
+
+INSERT OR IGNORE INTO settings (key, value) VALUES ('pdf_primary_color', '#8B1E1E');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('pdf_header_subtitle', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('pdf_use_custom_logo', '0');
+
+CREATE INDEX IF NOT EXISTS idx_invoices_related ON invoices(related_invoice_id);
+
+INSERT OR IGNORE INTO schema_version (version) VALUES (6);
+"#;
+
 pub fn run_migrations(conn: &Connection) -> AppResult<()> {
     let version: i64 = conn
         .query_row(
@@ -351,6 +368,19 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
 
     if version < 5 {
         conn.execute_batch(MIGRATION_V5)
+            .map_err(AppError::BaseDeDonnees)?;
+    }
+
+    let version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if version < 6 {
+        conn.execute_batch(MIGRATION_V6)
             .map_err(AppError::BaseDeDonnees)?;
     }
 

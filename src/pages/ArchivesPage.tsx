@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
+  apiAccountingExportFecLite,
   apiArchivesExportCsv,
   apiAuditList,
   apiInvoicesList,
@@ -29,6 +30,9 @@ export function ArchivesPage() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [fecFrom, setFecFrom] = useState("");
+  const [fecTo, setFecTo] = useState("");
+  const [exportingFec, setExportingFec] = useState(false);
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
@@ -77,6 +81,22 @@ export function ArchivesPage() {
     }
   }
 
+  async function exportFec() {
+    if (!sessionToken) return;
+    setExportingFec(true);
+    try {
+      const path = await apiAccountingExportFecLite(sessionToken, {
+        dateFrom: fecFrom || undefined,
+        dateTo: fecTo || undefined,
+      });
+      showToast(`Export FEC-lite : ${path}`, "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Export comptable impossible.", "error");
+    } finally {
+      setExportingFec(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card title="Factures archivées">
@@ -99,9 +119,35 @@ export function ArchivesPage() {
             ]}
           />
         </div>
-        <Button variant="gold" loading={exporting} onClick={() => void exportCsv()}>
-          Exporter toutes les factures (CSV)
-        </Button>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="gold" loading={exporting} onClick={() => void exportCsv()}>
+            Exporter toutes les factures (CSV)
+          </Button>
+        </div>
+        <div className="mt-4 grid gap-3 border-t border-[var(--color-border)] pt-4 sm:grid-cols-3">
+          <Input
+            label="FEC — du"
+            type="date"
+            value={fecFrom}
+            onChange={(e) => setFecFrom(e.target.value)}
+          />
+          <Input
+            label="FEC — au"
+            type="date"
+            value={fecTo}
+            onChange={(e) => setFecTo(e.target.value)}
+          />
+          <div className="flex items-end">
+            <Button
+              className="w-full"
+              variant="secondary"
+              loading={exportingFec}
+              onClick={() => void exportFec()}
+            >
+              Export comptable (FEC-lite)
+            </Button>
+          </div>
+        </div>
       </Card>
 
       <Card title="Liste des factures">

@@ -8,6 +8,10 @@ export type InvoiceStatus = "brouillon" | "emise" | "avoir";
 
 export type InvoiceKind = "facture" | "avoir" | "devis";
 
+export type InvoiceLineKind = "standard" | "location_salle";
+
+export type PaymentType = "reglement" | "acompte" | "solde";
+
 export interface ErrorPayload {
   message: string;
   code: string;
@@ -71,6 +75,7 @@ export interface InvoiceLine {
   line_ht: DecimalValue;
   line_tva: DecimalValue;
   line_ttc: DecimalValue;
+  line_kind?: InvoiceLineKind;
 }
 
 export interface InvoiceLineInput {
@@ -78,6 +83,7 @@ export interface InvoiceLineInput {
   quantity: DecimalValue;
   unit_price_ht: DecimalValue;
   tax_rate_percent: DecimalValue;
+  line_kind?: InvoiceLineKind;
 }
 
 export interface Invoice {
@@ -99,6 +105,21 @@ export interface Invoice {
   created_at: string;
   updated_at: string;
   issued_at?: string | null;
+  accepted_at?: string | null;
+  rental_start?: string | null;
+  rental_end?: string | null;
+}
+
+export interface InvoicePayment {
+  id: string;
+  invoice_id: string;
+  amount: DecimalValue;
+  paid_at: string;
+  method?: string | null;
+  reference?: string | null;
+  notes?: string | null;
+  payment_type: PaymentType;
+  created_at: string;
 }
 
 export interface RecordPaymentInput {
@@ -108,6 +129,7 @@ export interface RecordPaymentInput {
   method?: string;
   reference?: string;
   notes?: string;
+  payment_type?: PaymentType;
 }
 
 export interface InvoiceDraftInput {
@@ -117,6 +139,21 @@ export interface InvoiceDraftInput {
   customer_notes?: string;
   lines: InvoiceLineInput[];
   invoice_kind?: InvoiceKind;
+  related_invoice_id?: string;
+  rental_start?: string;
+  rental_end?: string;
+}
+
+export interface ConvertDevisInput {
+  devis_id: string;
+  issue_immediately?: boolean;
+}
+
+export interface SendDocumentEmailInput {
+  invoice_id: string;
+  to_email?: string;
+  subject?: string;
+  body?: string;
 }
 
 export interface SupplierInvoice {
@@ -144,6 +181,12 @@ export interface SupplierInvoiceInput {
   attachment_path?: string;
 }
 
+export interface MonthlyActivityRow {
+  month: string;
+  revenue_ht: DecimalValue;
+  supplier_ttc: DecimalValue;
+}
+
 export interface DashboardStats {
   contacts_count: number;
   drafts_count: number;
@@ -154,6 +197,11 @@ export interface DashboardStats {
   total_issued_ttc: DecimalValue;
   total_supplier_ttc: DecimalValue;
   total_unpaid_ttc: DecimalValue;
+  total_issued_ht: DecimalValue;
+  total_unpaid_ht: DecimalValue;
+  pending_quotes_count: number;
+  quotes_issued_count: number;
+  monthly_activity: MonthlyActivityRow[];
 }
 
 export interface AuditEntry {
@@ -203,6 +251,9 @@ export interface AppSettings {
   devis_prefix: string;
   bank_iban: string;
   bank_account: string;
+  pdf_primary_color: string;
+  pdf_header_subtitle: string;
+  pdf_use_custom_logo: boolean;
 }
 
 export interface AppSettingsPatch {
@@ -231,6 +282,9 @@ export interface AppSettingsPatch {
   devis_prefix?: string;
   bank_iban?: string;
   bank_account?: string;
+  pdf_primary_color?: string;
+  pdf_header_subtitle?: string;
+  pdf_use_custom_logo?: boolean;
 }
 
 export interface UserProfile {

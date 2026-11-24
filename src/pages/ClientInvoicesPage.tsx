@@ -3,16 +3,21 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
   apiContactsList,
+  apiContractsGenerateFromDevis,
+  apiInvoicesAcceptDevis,
   apiInvoicesCreateCreditNote,
   apiInvoicesCreateDraft,
+  apiInvoicesCreateFromDevis,
   apiInvoicesDeleteDraft,
   apiInvoicesGeneratePdf,
   apiInvoicesGet,
   apiInvoicesIssue,
   apiInvoicesList,
+  apiInvoicesListPayments,
   apiInvoicesPreviewPdf,
   apiInvoicesRecordPayment,
   apiInvoicesUpdateDraft,
+  apiMailSendDocument,
   ApiError,
 } from "@/lib/api";
 import {
@@ -29,6 +34,8 @@ import type {
   InvoiceKind,
   InvoiceLine,
   InvoiceLineInput,
+  InvoicePayment,
+  PaymentType,
 } from "@/types";
 import { Badge, invoiceStatusBadge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -49,6 +56,15 @@ const defaultLine = (): InvoiceLineInput => ({
   quantity: 1,
   unit_price_ht: 0,
   tax_rate_percent: 20,
+  line_kind: "standard",
+});
+
+const locationLine = (): InvoiceLineInput => ({
+  description: "Location de salle",
+  quantity: 1,
+  unit_price_ht: 0,
+  tax_rate_percent: 20,
+  line_kind: "location_salle",
 });
 
 function lineToInput(line: InvoiceLine): InvoiceLineInput {
@@ -57,6 +73,7 @@ function lineToInput(line: InvoiceLine): InvoiceLineInput {
     quantity: parseMoney(line.quantity),
     unit_price_ht: parseMoney(line.unit_price_ht),
     tax_rate_percent: parseMoney(line.tax_rate_percent),
+    line_kind: line.line_kind ?? "standard",
   };
 }
 
@@ -85,6 +102,8 @@ export function ClientInvoicesPage({
     due_date: "",
     customer_notes: "",
     invoice_kind: documentKind,
+    rental_start: "",
+    rental_end: "",
   });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -93,6 +112,9 @@ export function ClientInvoicesPage({
   const [paymentDate, setPaymentDate] = useState(
     () => new Date().toISOString().slice(0, 10),
   );
+  const [paymentType, setPaymentType] = useState<PaymentType>("reglement");
+  const [payments, setPayments] = useState<InvoicePayment[]>([]);
+  const [emailTo, setEmailTo] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -148,18 +170,38 @@ export function ClientInvoicesPage({
       due_date: "",
       customer_notes: "",
       invoice_kind: documentKind,
+      rental_start: "",
+      rental_end: "",
     });
     setEditorOpen(true);
+  }
+
+  function addLocationLine() {
+    setDraftForm((prev) => ({
+      ...prev,
+      lines: [...prev.lines, locationLine()],
+    }));
   }
 
   async function openDetail(inv: Invoice) {
     if (!sessionToken) return;
     try {
-      setDetail(await apiInvoicesGet(sessionToken, inv.id));
+      const full = await apiInvoicesGet(sessionToken, inv.id);
+      setDetail(full);
+      setEmailTo("");
       setPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return null;
       });
+      if (!isDevis && full.status === "emise") {
+        try {
+          setPayments(await apiInvoicesListPayments(sessionToken, full.id));
+        } catch {
+          setPayments([]);
+        }
+      } else {
+        setPayments([]);
+      }
     } catch (err) {
       showToast(
         err instanceof ApiError ? err.message : `Impossible d'ouvrir le ${docLabel}.`,
@@ -177,6 +219,8 @@ export function ClientInvoicesPage({
       customer_notes: inv.customer_notes ?? "",
       lines: inv.lines.length ? inv.lines.map(lineToInput) : [defaultLine()],
       invoice_kind: documentKind,
+      rental_start: inv.rental_start ?? "",
+      rental_end: inv.rental_end ?? "",
     });
     setEditorOpen(true);
   }
@@ -220,6 +264,8 @@ export function ClientInvoicesPage({
         due_date: draftForm.due_date || undefined,
         customer_notes: draftForm.customer_notes || undefined,
         invoice_kind: documentKind,
+        rental_start: draftForm.rental_start || undefined,
+        rental_end: draftForm.rental_end || undefined,
       };
       if (editingId) {
         await apiInvoicesUpdateDraft(sessionToken, editingId, input);
@@ -250,13 +296,76 @@ export function ClientInvoicesPage({
         amount,
         paid_at: paymentDate,
         method: "virement",
+        payment_type: paymentType,
       });
       setDetail(updated);
+      setPayments(await apiInvoicesListPayments(sessionToken, detail.id));
       setPaymentAmount("");
-      showToast("Règlement enregistré.", "success");
+      showToast(
+        paymentType === "acompte"
+          ? "Acompte enregistré."
+          : paymentType === "solde"
+            ? "Solde enregistré."
+            : "Règlement enregistré.",
+        "success",
+      );
       await load();
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Règlement impossible.", "error");
+    }
+  }
+
+  async function convertDevis(issueImmediately: boolean) {
+    if (!sessionToken || !detail) return;
+    try {
+      const facture = await apiInvoicesCreateFromDevis(sessionToken, {
+        devis_id: detail.id,
+        issue_immediately: issueImmediately,
+      });
+      showToast(
+        issueImmediately
+          ? `Facture ${facture.number ?? ""} émise depuis le devis.`
+          : "Brouillon facture créé depuis le devis.",
+        "success",
+      );
+      await load();
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Conversion impossible.", "error");
+    }
+  }
+
+  async function acceptDevis() {
+    if (!sessionToken || !detail) return;
+    try {
+      const updated = await apiInvoicesAcceptDevis(sessionToken, detail.id);
+      setDetail(updated);
+      showToast("Devis marqué comme accepté.", "success");
+      await load();
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Acceptation impossible.", "error");
+    }
+  }
+
+  async function generateContract() {
+    if (!sessionToken || !detail) return;
+    try {
+      const path = await apiContractsGenerateFromDevis(sessionToken, detail.id);
+      showToast(`Contrat de cession : ${path}`, "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Génération contrat impossible.", "error");
+    }
+  }
+
+  async function sendEmail() {
+    if (!sessionToken || !detail) return;
+    try {
+      await apiMailSendDocument(sessionToken, {
+        invoice_id: detail.id,
+        to_email: emailTo.trim() || undefined,
+      });
+      showToast("Document envoyé par e-mail.", "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Envoi e-mail impossible.", "error");
     }
   }
 
@@ -479,10 +588,25 @@ export function ClientInvoicesPage({
               Affiché sur le PDF (ex. Location salle, juillet 2026)
             </p>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input
+              label="Location — début"
+              type="datetime-local"
+              value={draftForm.rental_start ?? ""}
+              onChange={(e) => setDraftForm({ ...draftForm, rental_start: e.target.value })}
+            />
+            <Input
+              label="Location — fin"
+              type="datetime-local"
+              value={draftForm.rental_end ?? ""}
+              onChange={(e) => setDraftForm({ ...draftForm, rental_end: e.target.value })}
+            />
+          </div>
 
           <Table>
             <THead>
               <tr>
+                <Th>Type</Th>
                 <Th>Description</Th>
                 <Th>Qté</Th>
                 <Th>PU HT</Th>
@@ -500,6 +624,24 @@ export function ClientInvoicesPage({
                 );
                 return (
                   <Tr key={index}>
+                    <Td>
+                      <select
+                        className="rounded border border-[var(--color-border)] bg-transparent px-1 py-1 text-xs"
+                        value={line.line_kind ?? "standard"}
+                        onChange={(e) =>
+                          updateLine(index, {
+                            line_kind: e.target.value as "standard" | "location_salle",
+                            description:
+                              e.target.value === "location_salle" && !line.description
+                                ? "Location de salle"
+                                : line.description,
+                          })
+                        }
+                      >
+                        <option value="standard">Standard</option>
+                        <option value="location_salle">Location salle</option>
+                      </select>
+                    </Td>
                     <Td>
                       <input
                         className="w-full rounded border border-[var(--color-border)] bg-transparent px-2 py-1 text-sm"
@@ -547,9 +689,14 @@ export function ClientInvoicesPage({
               })}
             </TBody>
           </Table>
-          <Button variant="secondary" size="sm" onClick={addLine}>
-            Ajouter une ligne
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={addLine}>
+              Ajouter une ligne
+            </Button>
+            <Button variant="ghost" size="sm" onClick={addLocationLine}>
+              Ligne location de salle
+            </Button>
+          </div>
           <p className="text-right text-sm text-[var(--color-text-muted)]">
             Total HT {formatEur(totals.totalHt)} – TVA {formatEur(totals.totalTva)} – TTC{" "}
             <span className="font-semibold text-[var(--color-or)]">{formatEur(totals.totalTtc)}</span>
@@ -600,10 +747,30 @@ export function ClientInvoicesPage({
                   <Button variant="gold" onClick={() => void generatePdf(detail.id)}>
                     Enregistrer PDF
                   </Button>
+                  <Button variant="secondary" onClick={() => void sendEmail()}>
+                    Envoyer e-mail
+                  </Button>
                   {!isDevis && detail.status === "emise" && detail.invoice_kind !== "devis" ? (
                     <Button variant="danger" onClick={() => void createCreditNote(detail)}>
                       Avoir
                     </Button>
+                  ) : null}
+                  {isDevis && detail.status === "emise" ? (
+                    <>
+                      {!detail.accepted_at ? (
+                        <Button variant="secondary" onClick={() => void acceptDevis()}>
+                          Marquer accepté
+                        </Button>
+                      ) : (
+                        <Button variant="gold" onClick={() => void generateContract()}>
+                          Contrat de cession
+                        </Button>
+                      )}
+                      <Button onClick={() => void convertDevis(false)}>→ Facture (brouillon)</Button>
+                      <Button variant="secondary" onClick={() => void convertDevis(true)}>
+                        → Facture émise
+                      </Button>
+                    </>
                   ) : null}
                 </>
               ) : null}
@@ -621,6 +788,9 @@ export function ClientInvoicesPage({
               <Badge tone={invoiceStatusBadge(detail.status).tone}>
                 {invoiceStatusBadge(detail.status).label}
               </Badge>
+              {detail.accepted_at ? (
+                <span className="ml-2 text-xs text-[var(--color-or)]">Accepté</span>
+              ) : null}
             </p>
             <p>
               Totaux : HT {formatMoneyDecimal(detail.total_ht)} – TVA{" "}
@@ -635,6 +805,20 @@ export function ClientInvoicesPage({
             {detail.customer_notes ? (
               <p className="text-xs text-[var(--color-text-muted)]">{detail.customer_notes}</p>
             ) : null}
+            {(detail.rental_start || detail.rental_end) && (
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Location : {detail.rental_start ?? "—"} → {detail.rental_end ?? "—"}
+              </p>
+            )}
+
+            {(detail.status === "emise" || detail.status === "avoir") && (
+              <Input
+                label="E-mail destinataire (optionnel)"
+                value={emailTo}
+                onChange={(e) => setEmailTo(e.target.value)}
+                placeholder="Sinon e-mail du contact"
+              />
+            )}
 
             {previewUrl ? (
               <iframe
@@ -648,10 +832,24 @@ export function ClientInvoicesPage({
               </p>
             )}
 
+            {!isDevis && payments.length > 0 ? (
+              <div className="border-t border-[var(--color-border)] pt-3">
+                <p className="mb-2 text-xs font-medium">Règlements / acomptes</p>
+                <ul className="space-y-1 text-xs text-[var(--color-text-muted)]">
+                  {payments.map((p) => (
+                    <li key={p.id}>
+                      {p.paid_at} — {formatMoneyDecimal(p.amount)} — {p.payment_type}
+                      {p.method ? ` (${p.method})` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             {!isDevis && detail.status === "emise" && detail.payment_status !== "payee" ? (
-              <div className="mt-3 grid gap-2 border-t border-[var(--color-border)] pt-3 sm:grid-cols-3">
+              <div className="mt-3 grid gap-2 border-t border-[var(--color-border)] pt-3 sm:grid-cols-2 lg:grid-cols-4">
                 <Input
-                  label="Montant règlement"
+                  label="Montant"
                   type="number"
                   step="0.01"
                   value={paymentAmount}
@@ -663,9 +861,19 @@ export function ClientInvoicesPage({
                   value={paymentDate}
                   onChange={(e) => setPaymentDate(e.target.value)}
                 />
+                <Select
+                  label="Type"
+                  value={paymentType}
+                  onChange={(e) => setPaymentType(e.target.value as PaymentType)}
+                  options={[
+                    { value: "reglement", label: "Règlement" },
+                    { value: "acompte", label: "Acompte" },
+                    { value: "solde", label: "Solde" },
+                  ]}
+                />
                 <div className="flex items-end">
                   <Button className="w-full" variant="secondary" onClick={() => void recordPayment()}>
-                    Enregistrer le règlement
+                    Enregistrer
                   </Button>
                 </div>
               </div>

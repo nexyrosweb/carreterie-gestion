@@ -5,7 +5,8 @@ use crate::db::DbPool;
 use crate::error::{AppResult, ErrorPayload};
 use crate::models::contact::{Contact, ContactInput};
 use crate::models::invoice::{
-    Invoice, InvoiceDraftInput, InvoiceKind, InvoiceLineInput, InvoiceStatus, RecordPaymentInput,
+    ConvertDevisInput, Invoice, InvoiceDraftInput, InvoiceKind, InvoiceLineInput, InvoicePayment,
+    InvoiceStatus, RecordPaymentInput, SendDocumentEmailInput,
 };
 use crate::models::settings::{AppSettings, AppSettingsPatch};
 use crate::models::user::{UserProfile, UserProfilePatch};
@@ -16,13 +17,15 @@ use crate::models::import::{
     ImportedDocument,
 };
 use crate::paths;
-use crate::services::archives::ArchivesService;
+use crate::services::archives::{AccountingExportInput, ArchivesService};
 use crate::services::audit::AuditService;
 use crate::services::backup::{BackupInfo, BackupService};
 use crate::services::contacts::ContactsService;
+use crate::services::contracts::ContractsService;
 use crate::services::dashboard::{DashboardService, DashboardStats};
 use crate::services::demo::DemoService;
 use crate::services::invoices::InvoicesService;
+use crate::services::mail::MailService;
 use crate::services::pdf::PdfService;
 use crate::services::settings::SettingsService;
 use crate::services::import::{ImportLimits, ImportService};
@@ -465,6 +468,150 @@ pub fn invoices_record_payment(
 ) -> Result<Invoice, ErrorPayload> {
     authed(&state, &session_token, |user, db| {
         InvoicesService::record_payment(db, &user.id, input)
+    })
+}
+
+#[tauri::command]
+pub fn invoices_list_payments(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    invoice_id: String,
+) -> Result<Vec<InvoicePayment>, ErrorPayload> {
+    authed(&state, &session_token, |_u, db| {
+        InvoicesService::list_payments(db, &invoice_id)
+    })
+}
+
+#[tauri::command]
+pub fn invoices_create_from_devis(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    input: ConvertDevisInput,
+) -> Result<Invoice, ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        InvoicesService::create_from_devis(db, &user.id, input)
+    })
+}
+
+#[tauri::command]
+pub fn invoices_accept_devis(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    devis_id: String,
+) -> Result<Invoice, ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        InvoicesService::accept_devis(db, &user.id, &devis_id)
+    })
+}
+
+#[tauri::command]
+pub fn mail_send_document(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    input: SendDocumentEmailInput,
+) -> Result<(), ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        MailService::send_document(db, &user.id, input, user.is_demo)
+    })
+}
+
+#[tauri::command]
+pub fn mail_test_connection(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+) -> Result<String, ErrorPayload> {
+    authed(&state, &session_token, |_u, db| MailService::test_connection(db))
+}
+
+#[tauri::command]
+pub fn accounting_export_fec_lite(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    date_from: Option<String>,
+    date_to: Option<String>,
+) -> Result<String, ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        let parse = |s: Option<String>| -> AppResult<Option<chrono::NaiveDate>> {
+            match s {
+                None => Ok(None),
+                Some(v) if v.trim().is_empty() => Ok(None),
+                Some(v) => chrono::NaiveDate::parse_from_str(v.trim(), "%Y-%m-%d")
+                    .map(Some)
+                    .map_err(|_| {
+                        crate::error::AppError::validation("Date invalide (attendu AAAA-MM-JJ).")
+                    }),
+            }
+        };
+        let path = ArchivesService::export_fec_lite(
+            db,
+            &user.id,
+            AccountingExportInput {
+                date_from: parse(date_from)?,
+                date_to: parse(date_to)?,
+            },
+        )?;
+        paths::assert_path_inside_active_root(&path)?;
+        Ok(path.to_string_lossy().to_string())
+    })
+}
+
+#[tauri::command]
+pub fn contracts_generate_from_devis(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    devis_id: String,
+) -> Result<String, ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        ContractsService::generate_from_devis(db, &user.id, &devis_id, user.is_demo)
+    })
+}
+
+#[tauri::command]
+pub fn contracts_preview_from_devis(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    devis_id: String,
+) -> Result<String, ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        ContractsService::preview_from_devis(db, &devis_id, user.is_demo)
+    })
+}
+
+#[tauri::command]
+pub fn settings_set_logo(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    source_path: String,
+) -> Result<AppSettings, ErrorPayload> {
+    authed(&state, &session_token, |user, db| {
+        let src = std::path::PathBuf::from(&source_path);
+        if !src.is_file() {
+            return Err(crate::error::AppError::validation("Image introuvable."));
+        }
+        let ext = src
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png")
+            .to_ascii_lowercase();
+        if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp") {
+            return Err(crate::error::AppError::validation(
+                "Formats logo acceptés : PNG, JPG, WEBP.",
+            ));
+        }
+        let dest_dir = paths::attachments_dir()?.join("logos");
+        std::fs::create_dir_all(&dest_dir)?;
+        let dest = dest_dir.join(format!("custom_logo.{}", ext));
+        std::fs::copy(&src, &dest)?;
+        paths::assert_path_inside_active_root(&dest)?;
+        SettingsService::update(
+            db,
+            &user.id,
+            AppSettingsPatch {
+                logo_path: Some(dest.to_string_lossy().to_string()),
+                pdf_use_custom_logo: Some(true),
+                ..Default::default()
+            },
+        )
     })
 }
 
