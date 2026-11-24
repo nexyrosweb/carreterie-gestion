@@ -24,7 +24,9 @@ use crate::paths::{imports_dir, max_import_bytes};
 use crate::services::audit::AuditService;
 use crate::services::contacts::ContactsService;
 use crate::services::invoices::InvoicesService;
-use crate::services::pdf_parse::{check_amounts_coherence, parse_french_invoice_text};
+use crate::services::pdf_parse::{
+    check_amounts_coherence, parse_french_invoice_text, split_invoice_documents,
+};
 use crate::services::pdf_text::extract_pdf_text;
 use crate::services::settings::SettingsService;
 use crate::services::suppliers::SuppliersService;
@@ -100,7 +102,7 @@ impl ImportService {
                                 &imports,
                                 max_bytes,
                             ) {
-                                Ok(r) => results.push(r),
+                                Ok(batch) => results.extend(batch),
                                 Err(e) => {
                                     results.push(ImportAnalyzeResult {
                                         document: stub_error_document(&display, &e.to_string()),
@@ -124,7 +126,7 @@ impl ImportService {
             }
 
             match Self::analyze_one(db, user_id, &path_str, direction, &imports, max_bytes) {
-                Ok(r) => results.push(r),
+                Ok(batch) => results.extend(batch),
                 Err(e) => {
                     results.push(ImportAnalyzeResult {
                         document: stub_error_document(&path_str, &e.to_string()),
@@ -144,22 +146,28 @@ impl ImportService {
         direction: ImportDirection,
         imports: &Path,
         max_bytes: u64,
-    ) -> AppResult<ImportAnalyzeResult> {
+    ) -> AppResult<Vec<ImportAnalyzeResult>> {
         let path = PathBuf::from(source_path);
         validate_pdf_file(&path, max_bytes)?;
         let file_hash = sha256_file(&path)?;
 
-        if let Some(existing) = Self::get_by_hash(db, &file_hash)? {
-            let mut warnings = vec!["Document déjà importé (empreinte SHA-256 identique).".to_string()];
-            if existing.status != ImportStatus::Doublon {
-                warnings.push("Statut précédent : enregistrement existant retourné.".to_string());
+        let existing_batch = Self::list_by_base_hash(db, &file_hash)?;
+        if !existing_batch.is_empty() {
+            let mut out = Vec::new();
+            for existing in existing_batch {
+                let mut warnings =
+                    vec!["Document déjà importé (empreinte SHA-256 identique).".to_string()];
+                if existing.status != ImportStatus::Doublon {
+                    warnings.push("Statut précédent : enregistrement existant retourné.".to_string());
+                }
+                let matches = Self::match_contacts_for_doc(db, &existing)?;
+                out.push(ImportAnalyzeResult {
+                    document: existing,
+                    matches,
+                    warnings,
+                });
             }
-            let matches = Self::match_contacts_for_doc(db, &existing)?;
-            return Ok(ImportAnalyzeResult {
-                document: existing,
-                matches,
-                warnings,
-            });
+            return Ok(out);
         }
 
         let stored_name = format!("{file_hash}.pdf");
@@ -175,113 +183,174 @@ impl ImportService {
             .to_string();
 
         let extraction = extract_pdf_text(&stored_path)?;
-        let mut warnings = extraction.warnings;
+        let base_warnings = extraction.warnings;
 
-        let excerpt = if extraction.text.len() > 4000 {
-            Some(extraction.text[..4000].to_string())
-        } else if extraction.text.is_empty() {
-            None
-        } else {
-            Some(extraction.text.clone())
-        };
+        let segments = split_invoice_documents(&extraction.text);
+        let multi = segments.len() > 1;
+        let mut out = Vec::new();
 
-        let parse = parse_french_invoice_text(&extraction.text);
-        let amounts_coherent = parse.amounts_coherent;
+        for (index, segment) in segments.iter().enumerate() {
+            let mut warnings = base_warnings.clone();
+            if multi {
+                warnings.push(format!(
+                    "Document {}/{} détecté dans le PDF multi-pages.",
+                    index + 1,
+                    segments.len()
+                ));
+            }
 
-        let mut status = ImportStatus::EnAttente;
-        if Self::is_business_duplicate(
-            db,
-            parse.fields.invoice_number.as_deref(),
-            parse.fields.siret.as_deref(),
-            None,
-        )? {
-            status = ImportStatus::Doublon;
-            warnings.push(
-                "Doublon métier : même numéro de facture et SIRET déjà enregistrés.".to_string(),
-            );
+            let segment_hash = if multi {
+                format!("{file_hash}#{}", index + 1)
+            } else {
+                file_hash.clone()
+            };
+
+            let parse = parse_french_invoice_text(segment);
+            let amounts_coherent = parse.amounts_coherent;
+
+            let display_name = if multi {
+                let label = parse
+                    .fields
+                    .invoice_number
+                    .as_deref()
+                    .map(|n| {
+                        format!(
+                            "{} N°{n}",
+                            match parse.document_type {
+                                ImportDocumentType::Avoir => "Avoir",
+                                ImportDocumentType::Acompte => "Acompte",
+                                ImportDocumentType::Facture => "Facture",
+                                ImportDocumentType::Inconnu => "Document",
+                            }
+                        )
+                    })
+                    .unwrap_or_else(|| format!("doc {}/{}", index + 1, segments.len()));
+                let client = parse
+                    .fields
+                    .party_name
+                    .as_deref()
+                    .map(|c| format!(" — {c}"))
+                    .unwrap_or_default();
+                format!("{original_filename} — {label}{client}")
+            } else {
+                original_filename.clone()
+            };
+
+            let excerpt = if segment.len() > 4000 {
+                Some(segment[..4000].to_string())
+            } else if segment.is_empty() {
+                None
+            } else {
+                Some(segment.clone())
+            };
+
+            let mut status = ImportStatus::EnAttente;
+            if Self::is_business_duplicate(
+                db,
+                parse.fields.invoice_number.as_deref(),
+                parse
+                    .fields
+                    .siret
+                    .as_deref()
+                    .or(parse.fields.siren.as_deref()),
+                None,
+            )? {
+                status = ImportStatus::Doublon;
+                warnings.push(
+                    "Doublon métier : même numéro de facture et SIRET/SIREN déjà enregistrés."
+                        .to_string(),
+                );
+            }
+
+            let id = Uuid::new_v4().to_string();
+            let now = Utc::now().to_rfc3339();
+            let uncertain_json = serde_json::to_string(&parse.confidence.uncertain_fields)
+                .unwrap_or_else(|_| "[]".to_string());
+            let missing_json = serde_json::to_string(&parse.confidence.missing_fields)
+                .unwrap_or_else(|_| "[]".to_string());
+            let amounts_i = amounts_coherent.map(|b| if b { 1i32 } else { 0 });
+
+            db.with_conn_mut(|conn| {
+                conn.execute(
+                    r#"INSERT INTO imported_documents (
+                        id, file_hash, original_filename, stored_path, direction, document_type, status,
+                        extraction_source, issuer_name, party_name, party_address, siren, siret,
+                        invoice_number, issue_date, payment_date, payment_method, payment_status,
+                        description, total_ht, tax_rate, total_tva, total_ttc, related_invoice_ref,
+                        contact_id, linked_draft_invoice_id, linked_supplier_invoice_id,
+                        uncertain_fields, missing_fields, amounts_coherent, raw_text_excerpt,
+                        ocr_available, notes, created_at, updated_at, validated_at, validated_by
+                    ) VALUES (
+                        ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
+                        ?21,?22,?23,?24,NULL,NULL,NULL,?25,?26,?27,?28,?29,NULL,?30,?31,NULL,NULL
+                    )"#,
+                    params![
+                        id,
+                        segment_hash,
+                        display_name,
+                        stored_path.to_string_lossy().to_string(),
+                        direction.as_db_str(),
+                        parse.document_type.as_db_str(),
+                        status.as_db_str(),
+                        extraction.source.as_db_str(),
+                        parse.fields.issuer_name,
+                        parse.fields.party_name,
+                        parse.fields.party_address,
+                        parse.fields.siren,
+                        parse.fields.siret,
+                        parse.fields.invoice_number,
+                        parse.fields.issue_date,
+                        parse.fields.payment_date,
+                        parse.fields.payment_method,
+                        parse.fields.payment_status,
+                        parse.fields.description,
+                        parse.fields.total_ht,
+                        parse.fields.tax_rate,
+                        parse.fields.total_tva,
+                        parse.fields.total_ttc,
+                        parse.fields.related_invoice_ref,
+                        uncertain_json,
+                        missing_json,
+                        amounts_i,
+                        excerpt,
+                        if extraction.ocr_available { 1i32 } else { 0i32 },
+                        now,
+                        now,
+                    ],
+                )?;
+                Ok(())
+            })?;
+
+            AuditService::log(
+                db,
+                user_id,
+                "import_pdf_analyse",
+                Some("imported_document"),
+                Some(&id),
+                Some(&display_name),
+            )?;
+
+            let document = Self::get(db, &id)?;
+            let matches = Self::match_contacts(
+                db,
+                document.siret.as_deref(),
+                document.siren.as_deref(),
+                document.party_name.as_deref(),
+            )?;
+
+            out.push(ImportAnalyzeResult {
+                document,
+                matches,
+                warnings,
+            });
         }
 
-        let id = Uuid::new_v4().to_string();
-        let now = Utc::now().to_rfc3339();
-        let uncertain_json = serde_json::to_string(&parse.confidence.uncertain_fields)
-            .unwrap_or_else(|_| "[]".to_string());
-        let missing_json = serde_json::to_string(&parse.confidence.missing_fields)
-            .unwrap_or_else(|_| "[]".to_string());
-        let amounts_i = amounts_coherent.map(|b| if b { 1i32 } else { 0 });
-
-        db.with_conn_mut(|conn| {
-            conn.execute(
-                r#"INSERT INTO imported_documents (
-                    id, file_hash, original_filename, stored_path, direction, document_type, status,
-                    extraction_source, issuer_name, party_name, party_address, siren, siret,
-                    invoice_number, issue_date, payment_date, payment_method, payment_status,
-                    description, total_ht, tax_rate, total_tva, total_ttc, related_invoice_ref,
-                    contact_id, linked_draft_invoice_id, linked_supplier_invoice_id,
-                    uncertain_fields, missing_fields, amounts_coherent, raw_text_excerpt,
-                    ocr_available, notes, created_at, updated_at, validated_at, validated_by
-                ) VALUES (
-                    ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
-                    ?21,?22,?23,?24,NULL,NULL,NULL,?25,?26,?27,?28,?29,NULL,?30,?31,NULL,NULL
-                )"#,
-                params![
-                    id,
-                    file_hash,
-                    original_filename,
-                    stored_path.to_string_lossy().to_string(),
-                    direction.as_db_str(),
-                    parse.document_type.as_db_str(),
-                    status.as_db_str(),
-                    extraction.source.as_db_str(),
-                    parse.fields.issuer_name,
-                    parse.fields.party_name,
-                    parse.fields.party_address,
-                    parse.fields.siren,
-                    parse.fields.siret,
-                    parse.fields.invoice_number,
-                    parse.fields.issue_date,
-                    parse.fields.payment_date,
-                    parse.fields.payment_method,
-                    parse.fields.payment_status,
-                    parse.fields.description,
-                    parse.fields.total_ht,
-                    parse.fields.tax_rate,
-                    parse.fields.total_tva,
-                    parse.fields.total_ttc,
-                    parse.fields.related_invoice_ref,
-                    uncertain_json,
-                    missing_json,
-                    amounts_i,
-                    excerpt,
-                    if extraction.ocr_available { 1i32 } else { 0i32 },
-                    now,
-                    now,
-                ],
-            )?;
-            Ok(())
-        })?;
-
-        AuditService::log(
-            db,
-            user_id,
-            "import_pdf_analyse",
-            Some("imported_document"),
-            Some(&id),
-            Some(&original_filename),
-        )?;
-
-        let document = Self::get(db, &id)?;
-        let matches = Self::match_contacts(
-            db,
-            document.siret.as_deref(),
-            document.siren.as_deref(),
-            document.party_name.as_deref(),
-        )?;
-
-        Ok(ImportAnalyzeResult {
-            document,
-            matches,
-            warnings,
-        })
+        if out.is_empty() {
+            return Err(AppError::validation(
+                "Aucun document facture/avoir détecté dans le PDF.",
+            ));
+        }
+        Ok(out)
     }
 
     pub fn list(db: &DbPool, filters: ImportListFilters) -> AppResult<Vec<ImportedDocument>> {
@@ -556,6 +625,7 @@ impl ImportService {
         Self::get(db, id)
     }
 
+    #[allow(dead_code)]
     fn get_by_hash(db: &DbPool, hash: &str) -> AppResult<Option<ImportedDocument>> {
         db.with_conn(|conn| {
             let r = conn.query_row(
@@ -574,6 +644,30 @@ impl ImportService {
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
                 Err(e) => Err(AppError::BaseDeDonnees(e)),
             }
+        })
+    }
+
+    /// Retrouve tous les segments déjà importés d'un même fichier PDF (`hash` ou `hash#N`).
+    fn list_by_base_hash(db: &DbPool, base_hash: &str) -> AppResult<Vec<ImportedDocument>> {
+        db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, file_hash, original_filename, stored_path, direction, document_type, status,
+                extraction_source, issuer_name, party_name, party_address, siren, siret, invoice_number,
+                issue_date, payment_date, payment_method, payment_status, description, total_ht, tax_rate,
+                total_tva, total_ttc, related_invoice_ref, contact_id, linked_draft_invoice_id,
+                linked_supplier_invoice_id, uncertain_fields, missing_fields, amounts_coherent,
+                raw_text_excerpt, ocr_available, notes, created_at, updated_at, validated_at, validated_by
+                FROM imported_documents
+                WHERE file_hash = ?1 OR file_hash LIKE ?2
+                ORDER BY created_at ASC, file_hash ASC",
+            )?;
+            let like = format!("{base_hash}#%");
+            let rows = stmt.query_map(params![base_hash, like], map_imported)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
         })
     }
 

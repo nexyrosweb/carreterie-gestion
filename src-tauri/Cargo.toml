@@ -1,6 +1,6 @@
 [package]
 name = "carreterie-gestion"
-version = "1.0.7"
+version = "1.0.8"
 description = "Carreterie Gestion - gestion hors ligne pour le Théâtre de la Carreterie"
 authors = ["Nexyros"]
 edition = "2021"

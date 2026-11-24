@@ -4,11 +4,12 @@ Importation et analyse hors ligne des factures PDF (clients, acomptes, avoirs, f
 
 ## Fonctionnement
 
-1. Menu **Import PDF** → choisir un ou plusieurs fichiers `.pdf`.
+1. Menu **Import PDF** → choisir un ou plusieurs fichiers `.pdf` (ou un ZIP).
 2. Analyse locale : extraction de texte (`pdf-extract`), OCR optionnel via **Tesseract** (`tesseract` + pack `fra` sur le PATH).
-3. Vérification manuelle obligatoire (aperçu PDF + formulaire).
-4. Validation → archivage dans SQLite + conservation du PDF original.
-5. Aucune facture officielle numérotée n’est créée automatiquement.
+3. **PDF multi-documents** : si plusieurs factures / acomptes / avoirs sont dans le même fichier (une page = un document, ou en-têtes `Facture N°` / `Avoir N°`), l’import crée **une fiche par document**, avec client, type et montants détectés séparément.
+4. Vérification manuelle obligatoire (aperçu PDF + formulaire) pour chaque fiche.
+5. Validation → archivage dans SQLite + conservation du PDF original.
+6. Aucune facture officielle numérotée n’est créée automatiquement.
 
 ## Règles
 
