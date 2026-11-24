@@ -6,8 +6,50 @@ use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::contact::{Contact, ContactInput, ContactKind};
 use crate::services::audit::AuditService;
+use crate::siret::{french_vat_from_siret, normalize_siret_opt};
 
 pub struct ContactsService;
+
+fn prepare_identity(input: &ContactInput) -> AppResult<(Option<String>, Option<String>)> {
+    let siret = normalize_siret_opt(input.siret.as_deref())?;
+    let mut vat = input
+        .vat_number
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if vat.is_none() {
+        if let Some(ref s) = siret {
+            vat = french_vat_from_siret(s);
+        }
+    }
+    Ok((siret, vat))
+}
+
+fn assert_siret_unique(db: &DbPool, siret: &str, exclude_id: Option<&str>) -> AppResult<()> {
+    let count: i64 = db.with_conn(|conn| {
+        if let Some(id) = exclude_id {
+            conn.query_row(
+                "SELECT COUNT(*) FROM contacts WHERE siret = ?1 AND id != ?2",
+                params![siret, id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::from)
+        } else {
+            conn.query_row(
+                "SELECT COUNT(*) FROM contacts WHERE siret = ?1",
+                params![siret],
+                |row| row.get(0),
+            )
+            .map_err(AppError::from)
+        }
+    })?;
+    if count > 0 {
+        return Err(AppError::validation(
+            "Un contact avec ce SIRET existe déjà.",
+        ));
+    }
+    Ok(())
+}
 
 fn map_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Contact> {
     let kind_s: String = row.get(2)?;
@@ -78,6 +120,10 @@ impl ContactsService {
         if input.name.trim().is_empty() {
             return Err(AppError::validation("Le nom du contact est obligatoire."));
         }
+        let (siret, vat) = prepare_identity(&input)?;
+        if let Some(ref s) = siret {
+            assert_siret_unique(db, s, None)?;
+        }
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         let country = input.country.unwrap_or_else(|| "France".to_string());
@@ -95,8 +141,8 @@ impl ContactsService {
                     input.postal_code,
                     input.city,
                     country,
-                    input.siret,
-                    input.vat_number,
+                    siret,
+                    vat,
                     input.notes,
                     now,
                     now
@@ -124,6 +170,10 @@ impl ContactsService {
         if input.name.trim().is_empty() {
             return Err(AppError::validation("Le nom du contact est obligatoire."));
         }
+        let (siret, vat) = prepare_identity(&input)?;
+        if let Some(ref s) = siret {
+            assert_siret_unique(db, s, Some(id))?;
+        }
         let now = Utc::now().to_rfc3339();
         let country = input.country.unwrap_or_else(|| "France".to_string());
         let updated = db.with_conn_mut(|conn| {
@@ -139,8 +189,8 @@ impl ContactsService {
                     input.postal_code,
                     input.city,
                     country,
-                    input.siret,
-                    input.vat_number,
+                    siret,
+                    vat,
                     input.notes,
                     now,
                     id

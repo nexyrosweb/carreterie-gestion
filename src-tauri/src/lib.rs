@@ -10,6 +10,7 @@ mod models;
 mod money;
 mod paths;
 mod services;
+mod siret;
 mod state;
 
 pub use error::{AppError, AppResult};

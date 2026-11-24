@@ -75,9 +75,19 @@ impl SettingsService {
                 devis_prefix: Self::get_key_or(conn, "devis_prefix", "DV-"),
                 bank_iban: Self::get_key_or(conn, "bank_iban", ""),
                 bank_account: Self::get_key_or(conn, "bank_account", ""),
+                bank_bic: Self::get_key_or(conn, "bank_bic", ""),
+                bank_name: Self::get_key_or(conn, "bank_name", ""),
+                bank_holder: Self::get_key_or(conn, "bank_holder", ""),
                 pdf_primary_color: Self::get_key_or(conn, "pdf_primary_color", "#8B1E1E"),
                 pdf_header_subtitle: Self::get_key_or(conn, "pdf_header_subtitle", ""),
                 pdf_use_custom_logo: Self::get_key_or(conn, "pdf_use_custom_logo", "0") == "1",
+                pdf_template: {
+                    let t = Self::get_key_or(conn, "pdf_template", "classique");
+                    match t.as_str() {
+                        "compact" | "billetterie" | "classique" => t,
+                        _ => "classique".into(),
+                    }
+                },
             })
         })
     }
@@ -91,10 +101,20 @@ impl SettingsService {
                 Self::set_key(conn, "theatre_address", &v)?;
             }
             if let Some(v) = patch.theatre_siret {
-                Self::set_key(conn, "theatre_siret", &v)?;
+                let normalized = crate::siret::normalize_siret_opt(Some(v.as_str()))?;
+                let stored = normalized.clone().unwrap_or_default();
+                Self::set_key(conn, "theatre_siret", &stored)?;
+                // Auto TVA si patch TVA absent et SIRET valide
+                if patch.theatre_vat_number.is_none() {
+                    if let Some(ref s) = normalized {
+                        if let Some(vat) = crate::siret::french_vat_from_siret(s) {
+                            Self::set_key(conn, "theatre_vat_number", &vat)?;
+                        }
+                    }
+                }
             }
             if let Some(v) = patch.theatre_vat_number {
-                Self::set_key(conn, "theatre_vat_number", &v)?;
+                Self::set_key(conn, "theatre_vat_number", &v.trim())?;
             }
             if let Some(v) = patch.logo_path {
                 Self::set_key(conn, "logo_path", &v)?;
@@ -159,6 +179,15 @@ impl SettingsService {
             if let Some(v) = patch.bank_account {
                 Self::set_key(conn, "bank_account", &v)?;
             }
+            if let Some(v) = patch.bank_bic {
+                Self::set_key(conn, "bank_bic", &v)?;
+            }
+            if let Some(v) = patch.bank_name {
+                Self::set_key(conn, "bank_name", &v)?;
+            }
+            if let Some(v) = patch.bank_holder {
+                Self::set_key(conn, "bank_holder", &v)?;
+            }
             if let Some(v) = patch.pdf_primary_color {
                 Self::set_key(conn, "pdf_primary_color", &v)?;
             }
@@ -167,6 +196,13 @@ impl SettingsService {
             }
             if let Some(v) = patch.pdf_use_custom_logo {
                 Self::set_key(conn, "pdf_use_custom_logo", if v { "1" } else { "0" })?;
+            }
+            if let Some(v) = patch.pdf_template {
+                let normalized = match v.as_str() {
+                    "compact" | "billetterie" => v,
+                    _ => "classique".into(),
+                };
+                Self::set_key(conn, "pdf_template", &normalized)?;
             }
             Ok(())
         })?;

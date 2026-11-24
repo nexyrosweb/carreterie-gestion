@@ -173,7 +173,8 @@ impl DemoService {
                 postal_code: Some("84000".into()),
                 city: Some("Avignon".into()),
                 country: Some("France".into()),
-                siret: Some("11111111111111".into()),
+                // SIRET pédagogique valide (Luhn) — données fictives
+                siret: Some("73282932000074".into()),
                 vat_number: None,
                 notes: Some("Contact fictif — démonstration".into()),
             },
@@ -211,8 +212,8 @@ impl DemoService {
                 postal_code: Some("13001".into()),
                 city: Some("Marseille".into()),
                 country: Some("France".into()),
-                siret: Some("22222222222222".into()),
-                vat_number: Some("FR22222222222".into()),
+                siret: Some("44306184100047".into()),
+                vat_number: None,
                 notes: Some("Fournisseur fictif".into()),
             },
         )?;

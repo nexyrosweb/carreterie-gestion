@@ -15,6 +15,13 @@ import {
   ApiError,
 } from "@/lib/api";
 import { generateSecurePassword, isPasswordStrongEnough } from "@/lib/password";
+import {
+  digitsOnly,
+  formatSiretDisplay,
+  frenchVatFromSiret,
+  isValidSiret,
+  siretFeedback,
+} from "@/lib/siret";
 import type { AppSettings, AppSettingsPatch, UserProfile } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -84,9 +91,13 @@ export function SettingsPage() {
       devis_prefix: settings.devis_prefix,
       bank_iban: settings.bank_iban,
       bank_account: settings.bank_account,
+      bank_bic: settings.bank_bic,
+      bank_name: settings.bank_name,
+      bank_holder: settings.bank_holder,
       pdf_primary_color: settings.pdf_primary_color,
       pdf_header_subtitle: settings.pdf_header_subtitle,
       pdf_use_custom_logo: settings.pdf_use_custom_logo,
+      pdf_template: settings.pdf_template,
     };
     setSaving(true);
     try {
@@ -357,6 +368,16 @@ export function SettingsPage() {
       <form onSubmit={(e) => void saveSettings(e)}>
         <Card title="Thème PDF">
           <div className="grid gap-4 sm:grid-cols-2">
+            <Select
+              label="Modèle de facture"
+              value={settings.pdf_template || "classique"}
+              onChange={(e) => setSettings({ ...settings, pdf_template: e.target.value })}
+              options={[
+                { value: "classique", label: "Classique" },
+                { value: "compact", label: "Compact" },
+                { value: "billetterie", label: "Billetterie" },
+              ]}
+            />
             <Input
               label="Couleur principale (hex)"
               value={settings.pdf_primary_color}
@@ -372,6 +393,7 @@ export function SettingsPage() {
                 setSettings({ ...settings, pdf_header_subtitle: e.target.value })
               }
               placeholder="ex. Scène nationale"
+              className="sm:col-span-2"
             />
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input
@@ -406,12 +428,30 @@ export function SettingsPage() {
             <Input label="Préfixe avoirs" value={settings.credit_note_prefix} onChange={(e) => setSettings({ ...settings, credit_note_prefix: e.target.value })} />
             <Input label="Année" value={settings.invoice_year} readOnly />
             <Input
-              label="IBAN (PDF factures)"
+              label="IBAN"
               value={settings.bank_iban}
               onChange={(e) => setSettings({ ...settings, bank_iban: e.target.value })}
             />
             <Input
-              label="Compte bancaire N°"
+              label="BIC"
+              value={settings.bank_bic}
+              onChange={(e) => setSettings({ ...settings, bank_bic: e.target.value.toUpperCase() })}
+              placeholder="BNPAFRPPXXX"
+            />
+            <Input
+              label="Banque"
+              value={settings.bank_name}
+              onChange={(e) => setSettings({ ...settings, bank_name: e.target.value })}
+              placeholder="ex. Banque Populaire"
+            />
+            <Input
+              label="Titulaire du compte"
+              value={settings.bank_holder}
+              onChange={(e) => setSettings({ ...settings, bank_holder: e.target.value })}
+              placeholder="ex. Théâtre La Carreterie"
+            />
+            <Input
+              label="Compte bancaire N° (optionnel)"
               value={settings.bank_account}
               onChange={(e) => setSettings({ ...settings, bank_account: e.target.value })}
             />
@@ -424,6 +464,7 @@ export function SettingsPage() {
               label="Dossier d'export"
               value={settings.export_folder}
               onChange={(e) => setSettings({ ...settings, export_folder: e.target.value })}
+              className="sm:col-span-2"
             />
             <Textarea
               label="Mentions légales"
@@ -512,13 +553,41 @@ function TheatreIdentityFields({
   settings: AppSettings;
   setSettings: (s: AppSettings) => void;
 }) {
+  const siretFb = siretFeedback(settings.theatre_siret);
+  const sirenDigits = digitsOnly(settings.theatre_siret).slice(0, 9);
+
+  function onSiretChange(raw: string) {
+    const display = formatSiretDisplay(raw);
+    const digits = digitsOnly(raw);
+    let vat = settings.theatre_vat_number;
+    if (digits.length === 14 && isValidSiret(digits)) {
+      vat = frenchVatFromSiret(digits) ?? vat;
+    }
+    setSettings({ ...settings, theatre_siret: display, theatre_vat_number: vat });
+  }
+
   return (
     <div className="grid gap-4">
       <Input label="Nom du théâtre" value={settings.theatre_name} onChange={(e) => setSettings({ ...settings, theatre_name: e.target.value })} />
       <Input label="Adresse" value={settings.theatre_address} onChange={(e) => setSettings({ ...settings, theatre_address: e.target.value })} />
       <div className="grid gap-4 sm:grid-cols-2">
-        <Input label="SIRET" value={settings.theatre_siret} onChange={(e) => setSettings({ ...settings, theatre_siret: e.target.value })} />
-        <Input label="N° TVA intracommunautaire" value={settings.theatre_vat_number} onChange={(e) => setSettings({ ...settings, theatre_vat_number: e.target.value })} />
+        <Input
+          label="SIRET"
+          value={settings.theatre_siret}
+          onChange={(e) => onSiretChange(e.target.value)}
+          error={siretFb.ok ? undefined : siretFb.message}
+          hint={
+            siretFb.ok && sirenDigits.length === 9
+              ? `SIREN : ${sirenDigits.slice(0, 3)} ${sirenDigits.slice(3, 6)} ${sirenDigits.slice(6, 9)}`
+              : "14 chiffres — formatage automatique"
+          }
+        />
+        <Input
+          label="N° TVA intracommunautaire"
+          value={settings.theatre_vat_number}
+          onChange={(e) => setSettings({ ...settings, theatre_vat_number: e.target.value.toUpperCase() })}
+          hint="Calculé automatiquement depuis le SIRET"
+        />
       </div>
       <div>
         <p className="mb-2 text-sm font-medium text-[var(--color-text)]">Logo théâtre</p>

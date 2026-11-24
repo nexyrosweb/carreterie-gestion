@@ -8,6 +8,13 @@ import {
   apiContactsUpdate,
   ApiError,
 } from "@/lib/api";
+import {
+  digitsOnly,
+  formatSiretDisplay,
+  frenchVatFromSiret,
+  isValidSiret,
+  siretFeedback,
+} from "@/lib/siret";
 import type { Contact, ContactInput, ContactKind } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -96,7 +103,7 @@ export function ContactsPage() {
       postal_code: contact.postal_code ?? "",
       city: contact.city ?? "",
       country: contact.country ?? "France",
-      siret: contact.siret ?? "",
+      siret: contact.siret ? formatSiretDisplay(contact.siret) : "",
       vat_number: contact.vat_number ?? "",
       notes: contact.notes ?? "",
     });
@@ -104,15 +111,55 @@ export function ContactsPage() {
     setModalOpen(true);
   }
 
+  function findSiretDuplicate(siretDigits: string): Contact | undefined {
+    if (!siretDigits) return undefined;
+    return allContacts.find(
+      (c) =>
+        digitsOnly(c.siret ?? "") === siretDigits &&
+        (!editing || c.id !== editing.id),
+    );
+  }
+
+  function onSiretChange(raw: string) {
+    const display = formatSiretDisplay(raw);
+    const digits = digitsOnly(raw);
+    let vat = form.vat_number ?? "";
+    if (digits.length === 14 && isValidSiret(digits)) {
+      vat = frenchVatFromSiret(digits) ?? vat;
+    }
+    const next = { ...form, siret: display, vat_number: vat };
+    setForm(next);
+    const fb = siretFeedback(digits);
+    const dup = digits.length === 14 && fb.ok ? findSiretDuplicate(digits) : undefined;
+    setFormErrors((prev) => {
+      const nextErr = { ...prev };
+      if (!digits) delete nextErr.siret;
+      else if (!fb.ok) nextErr.siret = fb.message ?? "SIRET invalide";
+      else if (dup) nextErr.siret = `Doublon : déjà utilisé par « ${dup.name} »`;
+      else delete nextErr.siret;
+      return nextErr;
+    });
+  }
+
   async function handleSave() {
     if (!sessionToken) return;
     const errors: Record<string, string> = {};
     if (!form.name.trim()) errors.name = "Le nom est obligatoire.";
+    const siretDigits = digitsOnly(form.siret ?? "");
+    if (siretDigits) {
+      const fb = siretFeedback(siretDigits);
+      if (!fb.ok) errors.siret = fb.message ?? "SIRET invalide";
+      else {
+        const dup = findSiretDuplicate(siretDigits);
+        if (dup) errors.siret = `Un contact avec ce SIRET existe déjà (« ${dup.name} »).`;
+      }
+    }
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
     const input: ContactInput = {
       ...form,
+      siret: siretDigits || "",
       kind: editing ? form.kind : tab === "client" ? "client" : "fournisseur",
     };
 
@@ -238,8 +285,23 @@ export function ContactsPage() {
           <Input label="Adresse" value={form.address_line1} onChange={(e) => setForm({ ...form, address_line1: e.target.value })} className="sm:col-span-2" />
           <Input label="Code postal" value={form.postal_code} onChange={(e) => setForm({ ...form, postal_code: e.target.value })} />
           <Input label="Ville" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
-          <Input label="SIRET" value={form.siret} onChange={(e) => setForm({ ...form, siret: e.target.value })} />
-          <Input label="N° TVA" value={form.vat_number} onChange={(e) => setForm({ ...form, vat_number: e.target.value })} />
+          <Input
+            label="SIRET"
+            value={form.siret}
+            onChange={(e) => onSiretChange(e.target.value)}
+            error={formErrors.siret}
+            hint={
+              !formErrors.siret && digitsOnly(form.siret ?? "").length === 14
+                ? `SIREN : ${digitsOnly(form.siret ?? "").slice(0, 9)}`
+                : "14 chiffres — formatage et contrôle auto"
+            }
+          />
+          <Input
+            label="N° TVA"
+            value={form.vat_number}
+            onChange={(e) => setForm({ ...form, vat_number: e.target.value.toUpperCase() })}
+            hint="Calculé depuis le SIRET si laissé vide"
+          />
           <Textarea label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="sm:col-span-2" />
         </div>
       </Modal>

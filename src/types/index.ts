@@ -251,9 +251,14 @@ export interface AppSettings {
   devis_prefix: string;
   bank_iban: string;
   bank_account: string;
+  bank_bic: string;
+  bank_name: string;
+  bank_holder: string;
   pdf_primary_color: string;
   pdf_header_subtitle: string;
   pdf_use_custom_logo: boolean;
+  /** `classique` | `compact` | `billetterie` */
+  pdf_template: string;
 }
 
 export interface AppSettingsPatch {
@@ -282,9 +287,13 @@ export interface AppSettingsPatch {
   devis_prefix?: string;
   bank_iban?: string;
   bank_account?: string;
+  bank_bic?: string;
+  bank_name?: string;
+  bank_holder?: string;
   pdf_primary_color?: string;
   pdf_header_subtitle?: string;
   pdf_use_custom_logo?: boolean;
+  pdf_template?: string;
 }
 
 export interface UserProfile {

@@ -294,6 +294,15 @@ CREATE INDEX IF NOT EXISTS idx_invoices_related ON invoices(related_invoice_id);
 INSERT OR IGNORE INTO schema_version (version) VALUES (6);
 "#;
 
+const MIGRATION_V7: &str = r#"
+INSERT OR IGNORE INTO settings (key, value) VALUES ('bank_bic', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('bank_name', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('bank_holder', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('pdf_template', 'classique');
+
+INSERT OR IGNORE INTO schema_version (version) VALUES (7);
+"#;
+
 pub fn run_migrations(conn: &Connection) -> AppResult<()> {
     let version: i64 = conn
         .query_row(
@@ -381,6 +390,19 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
 
     if version < 6 {
         conn.execute_batch(MIGRATION_V6)
+            .map_err(AppError::BaseDeDonnees)?;
+    }
+
+    let version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if version < 7 {
+        conn.execute_batch(MIGRATION_V7)
             .map_err(AppError::BaseDeDonnees)?;
     }
 

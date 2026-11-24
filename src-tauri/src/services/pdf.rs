@@ -20,7 +20,25 @@ use crate::paths::attachments_dir;
 use crate::services::contacts::ContactsService;
 use crate::services::invoices::InvoicesService;
 use crate::services::settings::SettingsService;
+use crate::siret::{format_siren, format_siret};
 use crate::DISCLAIMER_E_FACTURATION;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PdfTemplate {
+    Classique,
+    Compact,
+    Billetterie,
+}
+
+impl PdfTemplate {
+    fn from_settings(s: &str) -> Self {
+        match s {
+            "compact" => Self::Compact,
+            "billetterie" => Self::Billetterie,
+            _ => Self::Classique,
+        }
+    }
+}
 
 /// Logo officiel embarqué (même fichier que `src/assets/brand/logo-theatre-carreterie.jpg`).
 const BRAND_LOGO_JPEG: &[u8] = include_bytes!("../../resources/logo-theatre-carreterie.jpg");
@@ -88,6 +106,9 @@ impl PdfService {
         let contact = ContactsService::get(db, &invoice.contact_id)?;
         let settings = SettingsService::load(db)?;
         let primary = parse_hex_rgb(&settings.pdf_primary_color);
+        let template = PdfTemplate::from_settings(&settings.pdf_template);
+        let compact = template == PdfTemplate::Compact;
+        let billetterie = template == PdfTemplate::Billetterie;
 
         let doc_label = invoice.invoice_kind.document_title();
         let number_display = invoice
@@ -125,88 +146,138 @@ impl PdfService {
 
         let _ = place_logo(&layer, &settings);
 
-        let mut y = 278.0;
+        let name_size = if compact { 10.0 } else { 12.0 };
+        let body_size = if compact { 8.0 } else { 9.0 };
+        let step = if compact { 3.8 } else { 4.5 };
+
+        let mut y = if compact { 282.0 } else { 278.0 };
         write_line(
             &layer,
             &font_bold,
-            12.0,
+            name_size,
             18.0,
             y,
             &settings.theatre_name.to_uppercase(),
         );
-        y -= 5.5;
+        y -= if compact { 4.5 } else { 5.5 };
         if !settings.pdf_header_subtitle.trim().is_empty() {
             write_line(
                 &layer,
                 &font_italic,
-                8.5,
+                if compact { 7.5 } else { 8.5 },
                 18.0,
                 y,
                 settings.pdf_header_subtitle.trim(),
             );
-            y -= 4.5;
+            y -= step;
         }
-        for line in settings.theatre_address.lines().take(3) {
-            write_line(&layer, &font, 9.0, 18.0, y, &line.to_uppercase());
-            y -= 4.5;
+        for line in settings.theatre_address.lines().take(if compact { 2 } else { 3 }) {
+            write_line(&layer, &font, body_size, 18.0, y, &line.to_uppercase());
+            y -= step;
         }
         if !settings.theatre_siret.is_empty() {
             write_line(
                 &layer,
                 &font,
-                8.5,
+                if compact { 7.5 } else { 8.5 },
                 18.0,
                 y,
-                &format!("Siret : {}", settings.theatre_siret),
+                &format!("Siret : {}", format_siret(&settings.theatre_siret)),
             );
-            y -= 4.5;
+            y -= step;
         }
-        if !settings.bank_iban.is_empty() {
+        // Coordonnées bancaires en-tête (modèle classique / billetterie ; compact = IBAN seul)
+        if !compact {
+            let _ = write_bank_header_lines(&layer, &font, &settings, y, step);
+        } else if !settings.bank_iban.is_empty() {
             write_line(
                 &layer,
                 &font,
-                8.5,
+                7.5,
                 18.0,
                 y,
                 &format!("IBAN : {}", settings.bank_iban),
             );
-            y -= 4.5;
-        }
-        if !settings.bank_account.is_empty() {
-            write_line(
-                &layer,
-                &font,
-                8.5,
-                18.0,
-                y,
-                &format!("Compte bancaire N° : {}", settings.bank_account),
-            );
         }
 
-        draw_filled_rect_rgb(&layer, 118.0, 228.0, 74.0, 32.0, primary, 0.12);
-        let mut cy = 252.0;
-        write_line(&layer, &font_bold, 10.0, 122.0, cy, &contact.name);
-        cy -= 5.0;
+        let client_box_y = if compact { 235.0 } else { 228.0 };
+        let client_box_h = if compact { 26.0 } else { 32.0 };
+        draw_filled_rect_rgb(&layer, 118.0, client_box_y, 74.0, client_box_h, primary, 0.12);
+        let mut cy = if compact { 255.0 } else { 252.0 };
+        write_line(
+            &layer,
+            &font_bold,
+            if compact { 9.0 } else { 10.0 },
+            122.0,
+            cy,
+            &contact.name,
+        );
+        cy -= if compact { 4.2 } else { 5.0 };
         if let Some(a) = &contact.address_line1 {
-            write_line(&layer, &font, 9.0, 122.0, cy, a);
-            cy -= 4.5;
+            write_line(&layer, &font, body_size, 122.0, cy, a);
+            cy -= step;
         }
         if let Some(cp) = &contact.postal_code {
             let city = contact.city.as_deref().unwrap_or("");
-            write_line(&layer, &font, 9.0, 122.0, cy, &format!("{cp} {city}"));
-            cy -= 4.5;
+            write_line(
+                &layer,
+                &font,
+                body_size,
+                122.0,
+                cy,
+                &format!("{cp} {city}"),
+            );
+            cy -= step;
         }
         if let Some(siret) = &contact.siret {
-            let siren = if siret.len() >= 9 { &siret[..9] } else { siret };
-            write_line(&layer, &font, 9.0, 122.0, cy, &format!("SIREN : {siren}"));
+            write_line(
+                &layer,
+                &font,
+                body_size,
+                122.0,
+                cy,
+                &format!("SIREN : {}", format_siren(siret)),
+            );
         }
 
-        draw_rect_stroke_rgb(&layer, 45.0, 205.0, 120.0, 14.0, primary);
-        draw_filled_rect_rgb(&layer, 45.5, 205.5, 119.0, 13.0, primary, 0.08);
-        let title = format!("{doc_label} N° {number_display} en date du {date_display}");
-        write_line(&layer, &font_bold, 11.0, 52.0, 210.0, &title);
+        let title_y = if compact { 212.0 } else { 205.0 };
+        if billetterie {
+            draw_filled_rect_rgb(&layer, 18.0, title_y, 174.0, 16.0, primary, 0.18);
+            let title = format!("{doc_label}  ·  N° {number_display}  ·  {date_display}");
+            write_line(&layer, &font_bold, 12.0, 22.0, title_y + 5.5, &title);
+            write_line(
+                &layer,
+                &font,
+                8.0,
+                22.0,
+                title_y + 1.0,
+                "Modèle billetterie",
+            );
+        } else {
+            draw_rect_stroke_rgb(&layer, 45.0, title_y, 120.0, if compact { 11.0 } else { 14.0 }, primary);
+            draw_filled_rect_rgb(
+                &layer,
+                45.5,
+                title_y + 0.5,
+                119.0,
+                if compact { 10.0 } else { 13.0 },
+                primary,
+                0.08,
+            );
+            let title = format!("{doc_label} N° {number_display} en date du {date_display}");
+            write_line(
+                &layer,
+                &font_bold,
+                if compact { 9.5 } else { 11.0 },
+                52.0,
+                title_y + 5.0,
+                &title,
+            );
+        }
 
-        draw_filled_rect_rgb(&layer, 18.0, 145.0, 174.0, 48.0, primary, 0.10);
+        let box_bottom = if compact { 155.0 } else { 145.0 };
+        let box_h = if compact { 38.0 } else { 48.0 };
+        draw_filled_rect_rgb(&layer, 18.0, box_bottom, 174.0, box_h, primary, 0.10);
         let has_location = invoice
             .lines
             .iter()
@@ -234,7 +305,15 @@ impl PdfService {
                 })
                 .unwrap_or_else(|| "Prestation :".to_string())
         };
-        write_line(&layer, &font_italic, 10.0, 22.0, 182.0, &prestation);
+        let prest_y = box_bottom + box_h - 10.0;
+        write_line(
+            &layer,
+            &font_italic,
+            if compact { 9.0 } else { 10.0 },
+            22.0,
+            prest_y,
+            &prestation,
+        );
 
         let tax_rate = invoice
             .lines
@@ -242,33 +321,52 @@ impl PdfService {
             .map(|l| format_amount(l.tax_rate_percent))
             .unwrap_or_else(|| "20.00".into());
 
+        let totals_x = if billetterie { 22.0 } else { 130.0 };
+        let ttc_y = box_bottom + 30.0;
+        let ttc_size = if billetterie {
+            14.0
+        } else if compact {
+            9.5
+        } else {
+            10.0
+        };
         write_line(
             &layer,
             &font_bold,
-            10.0,
-            130.0,
-            175.0,
-            &format!("TTC : {}", format_amount(invoice.total_ttc)),
+            ttc_size,
+            totals_x,
+            ttc_y,
+            &format!("TTC : {} €", format_amount(invoice.total_ttc)),
         );
         write_line(
             &layer,
             &font,
-            9.5,
-            130.0,
-            168.0,
-            &format!("Dont TVA {tax_rate} % : {}", format_amount(invoice.total_tva)),
+            if compact { 8.5 } else { 9.5 },
+            totals_x,
+            ttc_y - 7.0,
+            &format!(
+                "Dont TVA {tax_rate} % : {} €",
+                format_amount(invoice.total_tva)
+            ),
         );
         write_line(
             &layer,
             &font,
-            9.5,
-            130.0,
-            161.0,
-            &format!("HT : {}", format_amount(invoice.total_ht)),
+            if compact { 8.5 } else { 9.5 },
+            totals_x,
+            ttc_y - 14.0,
+            &format!("HT : {} €", format_amount(invoice.total_ht)),
         );
 
-        let mut ly = 135.0;
-        if invoice.lines.len() > 1 || has_location {
+        let mut ly = box_bottom - 8.0;
+        let detail_floor = if invoice.invoice_kind == InvoiceKind::Facture
+            && invoice.payment_status != "payee"
+        {
+            88.0
+        } else {
+            70.0
+        };
+        if !compact && (invoice.lines.len() > 1 || has_location) {
             write_line(&layer, &font_bold, 9.0, 18.0, ly, "Détail");
             ly -= 5.0;
             for line in &invoice.lines {
@@ -292,13 +390,33 @@ impl PdfService {
                     ),
                 );
                 ly -= 4.5;
-                if ly < 70.0 {
+                if ly < detail_floor {
+                    break;
+                }
+            }
+        } else if compact && !invoice.lines.is_empty() {
+            for line in invoice.lines.iter().take(4) {
+                write_line(
+                    &layer,
+                    &font,
+                    7.5,
+                    18.0,
+                    ly,
+                    &format!(
+                        "{} · {} × {} € HT",
+                        truncate(&line.description, 42),
+                        format_amount(line.quantity),
+                        format_amount(line.unit_price_ht),
+                    ),
+                );
+                ly -= 3.8;
+                if ly < detail_floor {
                     break;
                 }
             }
         }
 
-        if has_location {
+        if has_location && !compact {
             write_line(
                 &layer,
                 &font,
@@ -308,6 +426,10 @@ impl PdfService {
                 "Clause location : la salle est mise à disposition selon les horaires indiqués ; toute prolongation fait l'objet d'un avenant.",
             );
         }
+
+        let unpaid = invoice.invoice_kind == InvoiceKind::Facture
+            && invoice.payment_status != "payee";
+        let reste = (invoice.total_ttc - invoice.amount_paid).max(rust_decimal_macros::dec!(0));
 
         match invoice.invoice_kind {
             InvoiceKind::Devis => {
@@ -346,8 +468,18 @@ impl PdfService {
                 );
             }
             InvoiceKind::Facture => {
-                write_line(&layer, &font_bold, 9.0, 18.0, 52.0, "Montant réglé");
-                if invoice.amount_paid > rust_decimal_macros::dec!(0) {
+                if unpaid {
+                    write_unpaid_virement_block(
+                        &layer,
+                        &font,
+                        &font_bold,
+                        &settings,
+                        reste,
+                        primary,
+                        compact,
+                    );
+                } else {
+                    write_line(&layer, &font_bold, 9.0, 18.0, 52.0, "Montant réglé");
                     let method = "virement bancaire";
                     let paid_date = invoice
                         .issue_date
@@ -372,25 +504,6 @@ impl PdfService {
                         40.0,
                         &format!("Au profit de {}.", settings.theatre_name),
                     );
-                } else {
-                    write_line(
-                        &layer,
-                        &font,
-                        8.5,
-                        18.0,
-                        46.0,
-                        "En attente de règlement.",
-                    );
-                    if !settings.bank_iban.is_empty() {
-                        write_line(
-                            &layer,
-                            &font,
-                            8.0,
-                            18.0,
-                            40.0,
-                            &format!("IBAN : {}", settings.bank_iban),
-                        );
-                    }
                 }
             }
         }
@@ -672,6 +785,137 @@ fn write_line(
     text: &str,
 ) {
     layer.use_text(text, size, Mm(x), Mm(y), font);
+}
+
+/// IBAN / BIC / banque / titulaire sous l'en-tête émetteur. Renvoie le y suivant.
+fn write_bank_header_lines(
+    layer: &PdfLayerReference,
+    font: &printpdf::IndirectFontRef,
+    settings: &AppSettings,
+    mut y: f32,
+    step: f32,
+) -> f32 {
+    if !settings.bank_iban.is_empty() {
+        write_line(
+            layer,
+            font,
+            8.5,
+            18.0,
+            y,
+            &format!("IBAN : {}", settings.bank_iban),
+        );
+        y -= step;
+    }
+    if !settings.bank_bic.is_empty() {
+        write_line(
+            layer,
+            font,
+            8.5,
+            18.0,
+            y,
+            &format!("BIC : {}", settings.bank_bic),
+        );
+        y -= step;
+    }
+    if !settings.bank_name.is_empty() {
+        write_line(
+            layer,
+            font,
+            8.5,
+            18.0,
+            y,
+            &format!("Banque : {}", settings.bank_name),
+        );
+        y -= step;
+    }
+    if !settings.bank_holder.is_empty() {
+        write_line(
+            layer,
+            font,
+            8.5,
+            18.0,
+            y,
+            &format!("Titulaire : {}", settings.bank_holder),
+        );
+        y -= step;
+    } else if !settings.bank_account.is_empty() {
+        write_line(
+            layer,
+            font,
+            8.5,
+            18.0,
+            y,
+            &format!("Compte bancaire N° : {}", settings.bank_account),
+        );
+        y -= step;
+    }
+    y
+}
+
+fn write_unpaid_virement_block(
+    layer: &PdfLayerReference,
+    font: &printpdf::IndirectFontRef,
+    font_bold: &printpdf::IndirectFontRef,
+    settings: &AppSettings,
+    reste: rust_decimal::Decimal,
+    primary: (f32, f32, f32),
+    compact: bool,
+) {
+    let box_y = if compact { 34.0 } else { 32.0 };
+    let box_h = if compact { 22.0 } else { 28.0 };
+    draw_filled_rect_rgb(layer, 18.0, box_y, 174.0, box_h, primary, 0.14);
+    draw_rect_stroke_rgb(layer, 18.0, box_y, 174.0, box_h, primary);
+
+    let mut y = box_y + box_h - 5.0;
+    write_line(
+        layer,
+        font_bold,
+        if compact { 8.5 } else { 9.5 },
+        22.0,
+        y,
+        &format!(
+            "À régler par virement — reste dû : {} €",
+            format_amount(reste)
+        ),
+    );
+    y -= if compact { 4.0 } else { 5.0 };
+
+    let holder = if !settings.bank_holder.is_empty() {
+        settings.bank_holder.as_str()
+    } else {
+        settings.theatre_name.as_str()
+    };
+    let mut parts: Vec<String> = Vec::new();
+    if !settings.bank_iban.is_empty() {
+        parts.push(format!("IBAN {}", settings.bank_iban));
+    }
+    if !settings.bank_bic.is_empty() {
+        parts.push(format!("BIC {}", settings.bank_bic));
+    }
+    if !settings.bank_name.is_empty() {
+        parts.push(settings.bank_name.clone());
+    }
+    parts.push(format!("Titulaire : {holder}"));
+
+    write_line(
+        layer,
+        font,
+        if compact { 7.0 } else { 7.5 },
+        22.0,
+        y,
+        &parts.join("  ·  "),
+    );
+    if !compact {
+        y -= 4.5;
+        write_line(
+            layer,
+            font,
+            7.0,
+            22.0,
+            y,
+            "Merci d'indiquer le numéro de facture en libellé du virement.",
+        );
+    }
 }
 
 fn parse_hex_rgb(hex: &str) -> (f32, f32, f32) {
