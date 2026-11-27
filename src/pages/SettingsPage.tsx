@@ -9,6 +9,11 @@ import {
   apiAuthProfileSetAvatar,
   apiAuthProfileUpdate,
   apiMailTestConnection,
+  apiRemoteDbGetConfig,
+  apiRemoteDbMigrateFromSqlite,
+  apiRemoteDbSaveConfig,
+  apiRemoteDbStatus,
+  apiRemoteDbTestConnection,
   apiSettingsGet,
   apiSettingsSetLogo,
   apiSettingsUpdate,
@@ -22,7 +27,13 @@ import {
   isValidSiret,
   siretFeedback,
 } from "@/lib/siret";
-import type { AppSettings, AppSettingsPatch, UserProfile } from "@/types";
+import type {
+  AppSettings,
+  AppSettingsPatch,
+  RemoteDatabaseConfig,
+  RemoteDbStatus,
+  UserProfile,
+} from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -40,6 +51,18 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [pwd, setPwd] = useState({ current: "", next: "", confirm: "" });
+  const [remoteCfg, setRemoteCfg] = useState<RemoteDatabaseConfig>({
+    enabled: false,
+    host: "",
+    port: 3306,
+    database: "",
+    username: "",
+    password: "",
+    use_tls: true,
+    danger_accept_invalid_certs: true,
+  });
+  const [remoteStatus, setRemoteStatus] = useState<RemoteDbStatus | null>(null);
+  const [remoteBusy, setRemoteBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
@@ -51,12 +74,20 @@ export function SettingsPage() {
       ]);
       setSettings(s);
       setProfile(p);
+      if (!isDemo) {
+        const [cfg, st] = await Promise.all([
+          apiRemoteDbGetConfig(sessionToken),
+          apiRemoteDbStatus(sessionToken),
+        ]);
+        setRemoteCfg(cfg);
+        setRemoteStatus(st);
+      }
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Chargement paramètres impossible.", "error");
     } finally {
       setLoading(false);
     }
-  }, [sessionToken, showToast]);
+  }, [sessionToken, showToast, isDemo]);
 
   useEffect(() => {
     void load();
@@ -257,6 +288,167 @@ export function SettingsPage() {
           </Button>
         </Card>
       </form>
+
+      {!isDemo ? (
+        <Card title="Base partagée o2switch (MySQL distant)">
+          <p className="mb-4 text-sm text-[var(--color-text-muted)]">
+            Même base pour plusieurs PC hors site. Crée la base dans cPanel → MySQL, autorise tes IP
+            dans « MySQL distant », importe{" "}
+            <code className="text-xs">deploy/o2switch/schema.sql</code> via phpMyAdmin.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={remoteCfg.enabled}
+                onChange={(e) => setRemoteCfg({ ...remoteCfg, enabled: e.target.checked })}
+              />
+              Activer la base partagée MySQL
+            </label>
+            <Input
+              label="Hôte MySQL"
+              value={remoteCfg.host}
+              onChange={(e) => setRemoteCfg({ ...remoteCfg, host: e.target.value })}
+              placeholder="mysql.ton-domaine.o2switch.net"
+            />
+            <Input
+              label="Port"
+              type="number"
+              value={String(remoteCfg.port)}
+              onChange={(e) =>
+                setRemoteCfg({
+                  ...remoteCfg,
+                  port: Number.parseInt(e.target.value || "3306", 10) || 3306,
+                })
+              }
+            />
+            <Input
+              label="Nom de la base"
+              value={remoteCfg.database}
+              onChange={(e) => setRemoteCfg({ ...remoteCfg, database: e.target.value })}
+            />
+            <Input
+              label="Utilisateur MySQL"
+              value={remoteCfg.username}
+              onChange={(e) => setRemoteCfg({ ...remoteCfg, username: e.target.value })}
+              autoComplete="off"
+            />
+            <Input
+              label="Mot de passe MySQL"
+              type="password"
+              value={remoteCfg.password}
+              onChange={(e) => setRemoteCfg({ ...remoteCfg, password: e.target.value })}
+              autoComplete="new-password"
+              className="sm:col-span-2"
+            />
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={remoteCfg.use_tls}
+                onChange={(e) => setRemoteCfg({ ...remoteCfg, use_tls: e.target.checked })}
+              />
+              TLS / SSL
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={remoteCfg.danger_accept_invalid_certs}
+                onChange={(e) =>
+                  setRemoteCfg({
+                    ...remoteCfg,
+                    danger_accept_invalid_certs: e.target.checked,
+                  })
+                }
+              />
+              Accepter le certificat serveur
+            </label>
+          </div>
+          {remoteStatus ? (
+            <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+              Session actuelle :{" "}
+              {remoteStatus.is_remote_session ? "MySQL distant" : "SQLite local"}
+              {remoteStatus.restart_required
+                ? " — redémarre l’application après enregistrement pour appliquer."
+                : "."}
+            </p>
+          ) : null}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              loading={remoteBusy}
+              onClick={() => {
+                if (!sessionToken) return;
+                setRemoteBusy(true);
+                void apiRemoteDbSaveConfig(sessionToken, remoteCfg)
+                  .then((st) => {
+                    setRemoteStatus(st);
+                    showToast(
+                      st.restart_required
+                        ? "Config enregistrée — redémarre l’app."
+                        : "Config enregistrée.",
+                      "success",
+                    );
+                  })
+                  .catch((err) =>
+                    showToast(
+                      err instanceof ApiError ? err.message : "Enregistrement impossible.",
+                      "error",
+                    ),
+                  )
+                  .finally(() => setRemoteBusy(false));
+              }}
+            >
+              Enregistrer
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              loading={remoteBusy}
+              onClick={() => {
+                if (!sessionToken) return;
+                setRemoteBusy(true);
+                void apiRemoteDbTestConnection(sessionToken, remoteCfg)
+                  .then((msg) => showToast(msg, "success"))
+                  .catch((err) =>
+                    showToast(
+                      err instanceof ApiError ? err.message : "Test connexion échoué.",
+                      "error",
+                    ),
+                  )
+                  .finally(() => setRemoteBusy(false));
+              }}
+            >
+              Tester la connexion
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              loading={remoteBusy}
+              onClick={() => {
+                if (!sessionToken) return;
+                setRemoteBusy(true);
+                void apiRemoteDbMigrateFromSqlite(sessionToken)
+                  .then((r) => {
+                    const n = r.tables.reduce((acc, [, c]) => acc + c, 0);
+                    showToast(
+                      `Migration OK — ${n} lignes, ${r.files_uploaded} fichier(s).`,
+                      "success",
+                    );
+                  })
+                  .catch((err) =>
+                    showToast(
+                      err instanceof ApiError ? err.message : "Migration impossible.",
+                      "error",
+                    ),
+                  )
+                  .finally(() => setRemoteBusy(false));
+              }}
+            >
+              Migrer SQLite → MySQL
+            </Button>
+          </div>
+        </Card>
+      ) : null}
 
       <form onSubmit={(e) => void saveSettings(e)}>
         <Card title="Serveur SMTP">

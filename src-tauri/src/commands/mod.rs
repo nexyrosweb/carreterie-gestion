@@ -834,3 +834,90 @@ pub fn import_reject(
         ImportService::reject(db, &user.id, &id, reason)
     })
 }
+
+// — Base partagée o2switch (MySQL distant) —
+
+#[derive(Serialize)]
+pub struct RemoteDbStatus {
+    pub enabled: bool,
+    pub is_remote_session: bool,
+    pub host: String,
+    pub database: String,
+    pub restart_required: bool,
+}
+
+#[tauri::command]
+pub fn remote_db_get_config(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+) -> Result<crate::remote_config::RemoteDatabaseConfig, ErrorPayload> {
+    let _user = state.require_session(&session_token).map_err(ErrorPayload::from)?;
+    map_err(crate::remote_config::RemoteDatabaseConfig::load())
+}
+
+#[tauri::command]
+pub fn remote_db_status(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+) -> Result<RemoteDbStatus, ErrorPayload> {
+    let _user = state.require_session(&session_token).map_err(ErrorPayload::from)?;
+    map_err((|| {
+        let cfg = crate::remote_config::RemoteDatabaseConfig::load()?;
+        Ok(RemoteDbStatus {
+            enabled: cfg.enabled,
+            is_remote_session: state.prod_db.is_remote(),
+            host: cfg.host.clone(),
+            database: cfg.database.clone(),
+            restart_required: cfg.enabled != state.prod_db.is_remote(),
+        })
+    })())
+}
+
+#[tauri::command]
+pub fn remote_db_save_config(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    config: crate::remote_config::RemoteDatabaseConfig,
+) -> Result<RemoteDbStatus, ErrorPayload> {
+    let _user = state.require_session(&session_token).map_err(ErrorPayload::from)?;
+    map_err((|| {
+        if config.enabled {
+            config.validate_for_connect()?;
+        }
+        config.save()?;
+        Ok(RemoteDbStatus {
+            enabled: config.enabled,
+            is_remote_session: state.prod_db.is_remote(),
+            host: config.host.clone(),
+            database: config.database.clone(),
+            restart_required: config.enabled != state.prod_db.is_remote(),
+        })
+    })())
+}
+
+#[tauri::command]
+pub fn remote_db_test_connection(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+    config: crate::remote_config::RemoteDatabaseConfig,
+) -> Result<String, ErrorPayload> {
+    let _user = state.require_session(&session_token).map_err(ErrorPayload::from)?;
+    map_err((|| {
+        config.validate_for_connect()?;
+        let pool = DbPool::open_mysql(&config)?;
+        crate::db::mysql_schema::ensure_mysql_schema(&pool)?;
+        Ok(format!(
+            "Connexion OK — {}",
+            config.mysql_opts_url_hint()
+        ))
+    })())
+}
+
+#[tauri::command]
+pub fn remote_db_migrate_from_sqlite(
+    state: tauri::State<'_, AppState>,
+    session_token: String,
+) -> Result<crate::db::migrate_sqlite_to_mysql::MigrateResult, ErrorPayload> {
+    let _user = state.require_session(&session_token).map_err(ErrorPayload::from)?;
+    map_err(crate::db::migrate_sqlite_to_mysql::migrate_local_sqlite_to_remote())
+}

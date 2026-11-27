@@ -9,6 +9,7 @@ mod error;
 mod models;
 mod money;
 mod paths;
+mod remote_config;
 mod services;
 mod siret;
 mod state;
@@ -16,6 +17,7 @@ mod state;
 pub use error::{AppError, AppResult};
 pub use state::AppState;
 
+use db::mysql_schema::ensure_mysql_schema;
 use db::{run_migrations, DbPool};
 use paths::{ensure_app_directories, production_database_path};
 use services::demo::DemoService;
@@ -48,8 +50,12 @@ pub fn run() {
             backup_before_migrate().expect("Sauvegarde pré-migration impossible");
 
             let prod = DbPool::open_production().expect("Impossible d'ouvrir la base de production");
-            prod.with_conn_mut(|conn| run_migrations(conn))
-                .expect("Échec des migrations (production)");
+            if prod.is_remote() {
+                ensure_mysql_schema(&prod).expect("Échec du schéma MySQL o2switch");
+            } else {
+                prod.with_conn_mut(|conn| run_migrations(conn))
+                    .expect("Échec des migrations (production)");
+            }
 
             let demo = DemoService::open_and_prepare().expect("Impossible de préparer demo.db");
 
@@ -116,6 +122,11 @@ pub fn run() {
             commands::import_match_contacts,
             commands::import_validate,
             commands::import_reject,
+            commands::remote_db_get_config,
+            commands::remote_db_status,
+            commands::remote_db_save_config,
+            commands::remote_db_test_connection,
+            commands::remote_db_migrate_from_sqlite,
         ])
         .run(tauri::generate_context!())
         .expect("Erreur au démarrage de Carreterie Gestion");

@@ -34,6 +34,11 @@ pub struct BackupInfo {
 
 impl BackupService {
     pub fn create(db: &DbPool, user_id: &str, password: Option<&str>) -> AppResult<BackupInfo> {
+        if db.is_remote() {
+            return Err(AppError::validation(
+                "Mode o2switch : sauvegardez via phpMyAdmin (Export SQL), pas via VACUUM local.",
+            ));
+        }
         let backups = backups_dir()?;
         fs::create_dir_all(&backups)?;
 

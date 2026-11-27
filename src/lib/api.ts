@@ -22,7 +22,10 @@ import type {
   InvoiceLineInput,
   InvoicePayment,
   LoginResponse,
+  MigrateRemoteResult,
   RecordPaymentInput,
+  RemoteDatabaseConfig,
+  RemoteDbStatus,
   SendDocumentEmailInput,
   SupplierInvoice,
   SupplierInvoiceInput,
@@ -358,6 +361,25 @@ export const apiSettingsGet = (sessionToken: string) =>
 
 export const apiSettingsUpdate = (sessionToken: string, patch: AppSettingsPatch) =>
   call<AppSettings>("settings_update", withSession(sessionToken, { patch }));
+
+export const apiRemoteDbGetConfig = (sessionToken: string) =>
+  call<RemoteDatabaseConfig>("remote_db_get_config", withSession(sessionToken));
+
+export const apiRemoteDbStatus = (sessionToken: string) =>
+  call<RemoteDbStatus>("remote_db_status", withSession(sessionToken));
+
+export const apiRemoteDbSaveConfig = (
+  sessionToken: string,
+  config: RemoteDatabaseConfig,
+) => call<RemoteDbStatus>("remote_db_save_config", withSession(sessionToken, { config }));
+
+export const apiRemoteDbTestConnection = (
+  sessionToken: string,
+  config: RemoteDatabaseConfig,
+) => call<string>("remote_db_test_connection", withSession(sessionToken, { config }));
+
+export const apiRemoteDbMigrateFromSqlite = (sessionToken: string) =>
+  call<MigrateRemoteResult>("remote_db_migrate_from_sqlite", withSession(sessionToken));
 
 // — Import PDF —
 export const apiImportLimitsGet = (sessionToken: string) =>

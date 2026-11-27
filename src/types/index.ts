@@ -222,6 +222,30 @@ export interface BackupInfo {
   size_bytes?: number;
 }
 
+export interface RemoteDatabaseConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
+  use_tls: boolean;
+  danger_accept_invalid_certs: boolean;
+}
+
+export interface RemoteDbStatus {
+  enabled: boolean;
+  is_remote_session: boolean;
+  host: string;
+  database: string;
+  restart_required: boolean;
+}
+
+export interface MigrateRemoteResult {
+  tables: [string, number][];
+  files_uploaded: number;
+}
+
 export interface AppSettings {
   theatre_name: string;
   theatre_address: string;

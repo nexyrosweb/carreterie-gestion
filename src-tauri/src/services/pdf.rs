@@ -62,6 +62,7 @@ impl PdfService {
         let path = out_dir.join(file_name);
         let mut file = File::create(&path)?;
         file.write_all(&bytes)?;
+        let _ = crate::db::blobs::BlobStore::put_file(db, &path, "application/pdf");
         Ok(path)
     }
 
